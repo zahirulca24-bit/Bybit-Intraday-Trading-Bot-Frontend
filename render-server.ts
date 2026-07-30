@@ -10,6 +10,9 @@ import riskPolicyHandler from "./api/risk-policy";
 import dashboardTruthHandler from "./api/dashboard-truth";
 import replayHandler from "./api/replay";
 import liveJournalHandler from "./api/live-journal";
+import loginHandler from "./api/auth/login";
+import logoutHandler from "./api/auth/logout";
+import { ControlAuthError, requireControlSession } from "./api/_lib/control-auth";
 
 const app = express();
 const port = Number(process.env.PORT || 10000);
@@ -25,6 +28,8 @@ app.get("/healthz", (_req, res) => {
   res.status(200).json({ ok: true, service: "bybit-frontend-bff", environment: "BYBIT_DEMO" });
 });
 
+app.post("/api/auth/login", (req, res) => void loginHandler(req, res));
+app.post("/api/auth/logout", (req, res) => void logoutHandler(req, res));
 app.all("/api/replay/*", (req, res) => void replayHandler(req, res));
 app.all("/api/bot/toggle", (req, res) => void botToggleHandler(req, res));
 app.all("/api/scanner", (req, res) => void scannerHandler(req, res));
@@ -46,7 +51,22 @@ app.all("/api/analytics/*", (req, res) => {
   req.query = { ...req.query, path: analyticsPath };
   void analyticsHandler(req, res);
 });
-app.all("/api/*", (req, res) => void indexHandler(req, res));
+app.all("/api/*", (req, res) => {
+  const method = String(req.method || "GET").toUpperCase();
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    try {
+      requireControlSession(req);
+    } catch (error) {
+      if (error instanceof ControlAuthError) {
+        res.status(error.status).json({ error: error.message });
+        return;
+      }
+      res.status(500).json({ error: "Unable to validate operator session." });
+      return;
+    }
+  }
+  void indexHandler(req, res);
+});
 
 app.use(express.static(distPath, {
   index: false,
