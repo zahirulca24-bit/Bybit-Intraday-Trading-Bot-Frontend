@@ -17,16 +17,20 @@ test("Render generic mutation fallback requires an operator session", async () =
   assert.ok(source.includes('!["GET", "HEAD", "OPTIONS"].includes(method)'));
 });
 
-test("Vercel blocks the legacy generic POST bypass", async () => {
+test("Vercel blocks rewritten generic mutation routes", async () => {
   const source = await read("middleware.ts");
-  assert.ok(source.includes('matcher: "/api/index"'));
+  assert.ok(source.includes('matcher: "/api/:path*"'));
+  assert.ok(source.includes('"/api/auth/login"'));
+  assert.ok(source.includes('"/api/auth/logout"'));
+  assert.ok(source.includes('"/api/bot/toggle"'));
   assert.ok(source.includes("Legacy generic mutation endpoint is disabled"));
 });
 
-test("browser establishes an HttpOnly session without storing the control token", async () => {
+test("browser reauthenticates rejected sessions without storing the control token", async () => {
   const source = await read("src/services/operatorSession.ts");
   assert.ok(source.includes('nativeFetch("/api/auth/login"'));
   assert.ok(source.includes("window.prompt"));
+  assert.ok(source.includes("response.status === 401 || response.status === 403"));
   assert.ok(!source.includes("localStorage"));
   assert.ok(!source.includes("sessionStorage"));
   assert.ok(!source.includes("VITE_FRONTEND_CONTROL_TOKEN"));
