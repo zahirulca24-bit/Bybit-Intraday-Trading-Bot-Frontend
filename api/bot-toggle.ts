@@ -13,6 +13,8 @@ class UpstreamError extends Error {
 
 const BACKEND_URL = (process.env.BACKEND_API_URL || "https://bybit-intraday-trading-bot.onrender.com").replace(/\/$/, "");
 const ADMIN_TOKEN = (process.env.BACKEND_ADMIN_TOKEN || "").trim();
+const STATE_VERIFY_ATTEMPTS = 10;
+const STATE_VERIFY_DELAY_MS = 500;
 
 function sendJson(res: ResponseLike, status: number, payload: any): void {
   res.statusCode = status;
@@ -24,6 +26,10 @@ function sendJson(res: ResponseLike, status: number, payload: any): void {
 
 function textValue(value: any, fallback: string): string {
   return value === null || value === undefined || value === "" ? fallback : String(value);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function backendJson(path: string, init: RequestInit = {}): Promise<any> {
@@ -38,6 +44,22 @@ async function backendJson(path: string, init: RequestInit = {}): Promise<any> {
   try { payload = text ? JSON.parse(text) : {}; } catch { payload = { error: text }; }
   if (!response.ok) throw new UpstreamError(response.status, textValue(payload?.error || payload?.reason || payload?.message, `Backend request failed (${response.status})`), payload);
   return payload;
+}
+
+async function waitForBotState(expectedRunning: boolean): Promise<{ isRunning: boolean; status: any }> {
+  let latestStatus: any = null;
+  let latestRunning = !expectedRunning;
+
+  for (let attempt = 0; attempt < STATE_VERIFY_ATTEMPTS; attempt += 1) {
+    latestStatus = await backendJson("/api/bot/status");
+    latestRunning = (latestStatus?.bot || latestStatus || {})?.enabled === true;
+    if (latestRunning === expectedRunning) {
+      return { isRunning: latestRunning, status: latestStatus };
+    }
+    if (attempt < STATE_VERIFY_ATTEMPTS - 1) await sleep(STATE_VERIFY_DELAY_MS);
+  }
+
+  return { isRunning: latestRunning, status: latestStatus };
 }
 
 export default async function handler(req: RequestLike, res: ResponseLike): Promise<void> {
@@ -58,10 +80,17 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
           body: JSON.stringify({ symbol: textValue(bot?.symbol, "BTCUSDT"), interval: textValue(bot?.interval, "5"), mode: textValue(bot?.mode, "conservative"), riskPerTradePct: 2.0 }),
         });
     if (mutation?.ok === false) throw new UpstreamError(409, textValue(mutation?.reason || mutation?.error, "Backend blocked bot state change"), mutation);
-    const after = await backendJson("/api/bot/status");
-    const isRunning = (after?.bot || after || {})?.enabled === true;
-    if (isRunning !== expectedRunning) throw new UpstreamError(409, "Backend did not confirm the requested bot state.", { mutation, status: after });
-    sendJson(res, 200, { success: true, isRunning, authoritative: true, verifiedAt: Date.now() });
+
+    const verified = await waitForBotState(expectedRunning);
+    if (verified.isRunning !== expectedRunning) {
+      throw new UpstreamError(409, "Backend did not confirm the requested bot state within 5 seconds.", {
+        mutation,
+        status: verified.status,
+        expectedRunning,
+      });
+    }
+
+    sendJson(res, 200, { success: true, isRunning: verified.isRunning, authoritative: true, verifiedAt: Date.now() });
   } catch (error: any) {
     if (error instanceof ControlAuthError) {
       res.setHeader("X-Control-Auth-Error", "session");
