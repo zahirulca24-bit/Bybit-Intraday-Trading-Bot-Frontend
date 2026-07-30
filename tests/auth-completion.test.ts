@@ -41,3 +41,13 @@ test("browser retries only tagged control-session failures", async () => {
   assert.ok(!source.includes("sessionStorage"));
   assert.ok(!source.includes("VITE_FRONTEND_CONTROL_TOKEN"));
 });
+
+test("bot toggle waits for the asynchronous authoritative state without repeating the mutation", async () => {
+  const source = await read("api/bot-toggle.ts");
+  assert.ok(source.includes("STATE_VERIFY_ATTEMPTS"));
+  assert.ok(source.includes("STATE_VERIFY_DELAY_MS"));
+  assert.ok(source.includes("waitForBotState(expectedRunning)"));
+  assert.ok(source.includes("Backend did not confirm the requested bot state within 5 seconds."));
+  assert.equal((source.match(/backendJson\("\/api\/bot\/stop"/g) || []).length, 1);
+  assert.equal((source.match(/backendJson\("\/api\/bot\/start"/g) || []).length, 1);
+});
