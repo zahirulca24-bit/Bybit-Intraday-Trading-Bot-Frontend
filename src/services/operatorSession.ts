@@ -55,7 +55,8 @@ export function installOperatorSessionFetch(): void {
       credentials: init?.credentials || "same-origin",
     });
 
-    if (response.status !== 401 || !isPrivilegedMutation(input, init)) return response;
+    const sessionRejected = response.status === 401 || response.status === 403;
+    if (!sessionRejected || !isPrivilegedMutation(input, init)) return response;
 
     loginInFlight ||= login().finally(() => {
       loginInFlight = null;
