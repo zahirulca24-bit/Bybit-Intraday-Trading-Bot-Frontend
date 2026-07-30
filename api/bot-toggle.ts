@@ -63,7 +63,11 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     if (isRunning !== expectedRunning) throw new UpstreamError(409, "Backend did not confirm the requested bot state.", { mutation, status: after });
     sendJson(res, 200, { success: true, isRunning, authoritative: true, verifiedAt: Date.now() });
   } catch (error: any) {
-    if (error instanceof ControlAuthError || error instanceof UpstreamError) {
+    if (error instanceof ControlAuthError) {
+      sendJson(res, error.status, { error: error.message });
+      return;
+    }
+    if (error instanceof UpstreamError) {
       sendJson(res, error.status, { error: error.message, upstream: error.payload });
       return;
     }
