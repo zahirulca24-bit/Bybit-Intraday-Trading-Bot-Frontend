@@ -64,7 +64,8 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     sendJson(res, 200, { success: true, isRunning, authoritative: true, verifiedAt: Date.now() });
   } catch (error: any) {
     if (error instanceof ControlAuthError) {
-      sendJson(res, error.status, { error: error.message });
+      res.setHeader("X-Control-Auth-Error", "session");
+      sendJson(res, error.status, { error: error.message, code: "CONTROL_SESSION_INVALID" });
       return;
     }
     if (error instanceof UpstreamError) {

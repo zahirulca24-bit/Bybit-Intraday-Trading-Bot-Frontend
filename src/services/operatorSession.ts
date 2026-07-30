@@ -19,6 +19,11 @@ function isPrivilegedMutation(input: RequestInfo | URL, init?: RequestInit): boo
   return method !== "GET" && PRIVILEGED_PATHS.has(requestPath(input));
 }
 
+function isControlSessionFailure(response: Response): boolean {
+  return (response.status === 401 || response.status === 403)
+    && response.headers.get("X-Control-Auth-Error") === "session";
+}
+
 export function installOperatorSessionFetch(): void {
   const nativeFetch = window.fetch.bind(window);
   let loginInFlight: Promise<boolean> | null = null;
@@ -55,8 +60,7 @@ export function installOperatorSessionFetch(): void {
       credentials: init?.credentials || "same-origin",
     });
 
-    const sessionRejected = response.status === 401 || response.status === 403;
-    if (!sessionRejected || !isPrivilegedMutation(input, init)) return response;
+    if (!isControlSessionFailure(response) || !isPrivilegedMutation(input, init)) return response;
 
     loginInFlight ||= login().finally(() => {
       loginInFlight = null;

@@ -58,7 +58,8 @@ app.all("/api/*", (req, res) => {
       requireControlSession(req);
     } catch (error) {
       if (error instanceof ControlAuthError) {
-        res.status(error.status).json({ error: error.message });
+        res.setHeader("X-Control-Auth-Error", "session");
+        res.status(error.status).json({ error: error.message, code: "CONTROL_SESSION_INVALID" });
         return;
       }
       res.status(500).json({ error: "Unable to validate operator session." });
