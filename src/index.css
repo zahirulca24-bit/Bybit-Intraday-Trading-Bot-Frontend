@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+/* Strategy Analytics: cumulative P&L and drawdown can legitimately share the
+   same coordinates while the account remains below its starting peak. Keep
+   both series visually distinguishable without changing the truthful scale. */
+#strategy-analytics-live svg[aria-label="Cumulative PnL and drawdown curve"] polyline[stroke="#22d3ee"] {
+  stroke-width: 2.75;
+  opacity: 1;
+  filter: drop-shadow(0 0 2px rgba(34, 211, 238, 0.75));
+}
+
+#strategy-analytics-live svg[aria-label="Cumulative PnL and drawdown curve"] polyline[stroke="#fb7185"] {
+  stroke-width: 4;
+  stroke-dasharray: 12 8;
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(251, 113, 133, 0.9));
+}
+
+#strategy-analytics-live span.bg-rose-400 {
+  background: repeating-linear-gradient(
+    90deg,
+    #fb7185 0 8px,
+    transparent 8px 12px
+  );
+}

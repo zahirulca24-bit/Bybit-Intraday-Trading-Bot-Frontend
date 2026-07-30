@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080b11" />
+    <title>Bybit Demo Intraday Trading Bot</title>
+    <style>
+      html,
+      body,
+      #root {
+        min-height: 100%;
+        margin: 0;
+        background: #080b11;
+        color: #e2e8f0;
+      }
+
+      #boot-status {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        box-sizing: border-box;
+        font: 13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        color: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="boot-status">Starting Bybit Demo control center…</div>
+    </div>
+    <script>
+      (() => {
+        const showRuntimeError = (message) => {
+          if (document.getElementById("client-runtime-alert")) return;
+          const alert = document.createElement("div");
+          alert.id = "client-runtime-alert";
+          alert.style.cssText = "position:fixed;inset:16px;z-index:2147483647;display:flex;align-items:flex-start;justify-content:center;pointer-events:none";
+          const panel = document.createElement("div");
+          panel.style.cssText = "width:min(760px,100%);margin-top:32px;padding:20px;border:1px solid rgba(244,63,94,.55);border-radius:12px;background:#121621;color:#e2e8f0;box-shadow:0 24px 80px rgba(0,0,0,.65);font:13px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;pointer-events:auto";
+          const title = document.createElement("strong");
+          title.style.color = "#fb7185";
+          title.textContent = "Browser-side frontend error";
+          const detail = document.createElement("pre");
+          detail.style.cssText = "margin:12px 0 0;padding:12px;white-space:pre-wrap;overflow:auto;border-radius:8px;background:#080b11;color:#fda4af";
+          detail.textContent = String(message || "Unknown browser error");
+          panel.append(title, detail);
+          alert.appendChild(panel);
+          document.body.appendChild(alert);
+        };
+
+        window.addEventListener("error", (event) => {
+          showRuntimeError(event.error?.message || event.message || "JavaScript startup error");
+        });
+
+        window.addEventListener("unhandledrejection", (event) => {
+          showRuntimeError(event.reason?.message || event.reason || "Unhandled browser promise rejection");
+        });
+
+        window.setTimeout(() => {
+          if (document.getElementById("boot-status")) {
+            showRuntimeError("Application startup timed out before React mounted.");
+          }
+        }, 10000);
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

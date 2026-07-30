@@ -1,0 +1,49 @@
+name: Historical Replay Render E2E
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replay-render-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  replay-render-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install --include=dev --no-audit --no-fund
+
+      - name: Install Chromium
+        run: npx playwright install chromium
+
+      - name: Typecheck, build and run full Render BFF replay E2E
+        run: npm run verify
+
+      - name: Verify Render Blueprint contract
+        run: |
+          grep -F 'startCommand: npm start' render.yaml
+          grep -F 'healthCheckPath: /healthz' render.yaml
+          grep -F 'BACKEND_ADMIN_TOKEN' render.yaml
+          grep -F 'app.all("/api/replay/*"' render-server.ts
+
+      - name: Verify browser bundle cannot contain backend credentials
+        run: |
+          if grep -R "BACKEND_ADMIN_TOKEN\|step9-e2e-secret" dist; then
+            echo "Server-only credential marker leaked into the browser build."
+            exit 1
+          fi

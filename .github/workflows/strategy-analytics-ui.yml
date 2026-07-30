@@ -1,0 +1,36 @@
+name: Strategy Analytics UI CI
+
+on:
+  pull_request:
+    paths:
+      - "api/analytics.ts"
+      - "src/components/StrategyAnalyticsView.tsx"
+      - "src/services/api.ts"
+      - "src/App.tsx"
+      - "vercel.json"
+      - ".github/workflows/strategy-analytics-ui.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build

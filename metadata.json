@@ -1,0 +1,6 @@
+{
+  "name": "Bybit Demo Intraday Trading Bot",
+  "description": "Professional trading terminal dashboard for Bybit Demo Intraday Trading Bot with runtime status, account summary, order lifecycle pipeline, live chart, positions, and state indicators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

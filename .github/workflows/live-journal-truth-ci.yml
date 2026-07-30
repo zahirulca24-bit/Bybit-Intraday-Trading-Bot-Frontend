@@ -1,0 +1,51 @@
+name: Live Journal Truth CI
+
+on:
+  pull_request:
+    paths:
+      - "api/live-journal.ts"
+      - "render-server.ts"
+      - "tests/live-journal-truth.test.ts"
+      - "package.json"
+      - ".github/workflows/live-journal-truth-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-journal-truth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: TypeScript verification
+        run: npm run typecheck
+
+      - name: Run journal truth regressions
+        run: npx tsx tests/live-journal-truth.test.ts
+
+      - name: Production build
+        run: npm run build
+
+      - name: Verify Render route precedence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path("render-server.ts").read_text(encoding="utf-8")
+          journal = text.index('app.get("/api/logs"')
+          fallback = text.index('app.all("/api/*"')
+          assert journal < fallback, "/api/logs must be registered before the generic BFF fallback"
+          assert 'liveJournalHandler' in text
+          print("Render live journal route precedence verified")
+          PY
