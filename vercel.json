@@ -4,23 +4,17 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "functions": {
-    "api/index.ts": {
-      "maxDuration": 30
-    },
-    "api/scanner-live.ts": {
-      "maxDuration": 30
-    },
-    "api/bot-toggle.ts": {
-      "maxDuration": 30
-    },
-    "api/analytics.ts": {
-      "maxDuration": 30
-    },
-    "api/risk-policy.ts": {
-      "maxDuration": 30
-    }
+    "api/index.ts": { "maxDuration": 30 },
+    "api/scanner-live.ts": { "maxDuration": 30 },
+    "api/bot-toggle.ts": { "maxDuration": 30 },
+    "api/analytics.ts": { "maxDuration": 30 },
+    "api/risk-policy.ts": { "maxDuration": 30 },
+    "api/auth/login.ts": { "maxDuration": 10 },
+    "api/auth/logout.ts": { "maxDuration": 10 }
   },
   "rewrites": [
+    { "source": "/api/auth/login", "destination": "/api/auth/login" },
+    { "source": "/api/auth/logout", "destination": "/api/auth/logout" },
     { "source": "/api/scanner", "destination": "/api/scanner-live" },
     { "source": "/api/bot/toggle", "destination": "/api/bot-toggle" },
     { "source": "/api/risk/policy", "destination": "/api/risk-policy" },
