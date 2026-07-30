@@ -11,10 +11,12 @@ test("Render registers login and logout before the generic BFF fallback", async 
   assert.ok(source.indexOf('app.post("/api/auth/login"') < source.indexOf('app.all("/api/*"'));
 });
 
-test("Render generic mutation fallback requires an operator session", async () => {
+test("Render generic mutation fallback requires and tags operator sessions", async () => {
   const source = await read("render-server.ts");
   assert.ok(source.includes("requireControlSession(req)"));
   assert.ok(source.includes('!["GET", "HEAD", "OPTIONS"].includes(method)'));
+  assert.ok(source.includes('res.setHeader("X-Control-Auth-Error", "session")'));
+  assert.ok(source.includes('code: "CONTROL_SESSION_INVALID"'));
 });
 
 test("Vercel blocks rewritten generic mutation routes", async () => {
@@ -26,11 +28,15 @@ test("Vercel blocks rewritten generic mutation routes", async () => {
   assert.ok(source.includes("Legacy generic mutation endpoint is disabled"));
 });
 
-test("browser reauthenticates rejected sessions without storing the control token", async () => {
+test("browser retries only tagged control-session failures", async () => {
   const source = await read("src/services/operatorSession.ts");
+  const toggle = await read("api/bot-toggle.ts");
   assert.ok(source.includes('nativeFetch("/api/auth/login"'));
   assert.ok(source.includes("window.prompt"));
+  assert.ok(source.includes('response.headers.get("X-Control-Auth-Error") === "session"'));
   assert.ok(source.includes("response.status === 401 || response.status === 403"));
+  assert.ok(toggle.includes('res.setHeader("X-Control-Auth-Error", "session")'));
+  assert.ok(toggle.includes('code: "CONTROL_SESSION_INVALID"'));
   assert.ok(!source.includes("localStorage"));
   assert.ok(!source.includes("sessionStorage"));
   assert.ok(!source.includes("VITE_FRONTEND_CONTROL_TOKEN"));
