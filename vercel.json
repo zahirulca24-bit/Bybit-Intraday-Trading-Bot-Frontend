@@ -10,11 +10,13 @@
     "api/analytics.ts": { "maxDuration": 30 },
     "api/risk-policy.ts": { "maxDuration": 30 },
     "api/auth/login.ts": { "maxDuration": 10 },
-    "api/auth/logout.ts": { "maxDuration": 10 }
+    "api/auth/logout.ts": { "maxDuration": 10 },
+    "api/auth/session.ts": { "maxDuration": 10 }
   },
   "rewrites": [
     { "source": "/api/auth/login", "destination": "/api/auth/login" },
     { "source": "/api/auth/logout", "destination": "/api/auth/logout" },
+    { "source": "/api/auth/session", "destination": "/api/auth/session" },
     { "source": "/api/scanner", "destination": "/api/scanner-live" },
     { "source": "/api/bot/toggle", "destination": "/api/bot-toggle" },
     { "source": "/api/risk/policy", "destination": "/api/risk-policy" },
