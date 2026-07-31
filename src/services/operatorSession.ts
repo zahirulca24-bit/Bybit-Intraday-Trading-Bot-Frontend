@@ -24,11 +24,58 @@ function isControlSessionFailure(response: Response): boolean {
     && response.headers.get("X-Control-Auth-Error") === "session";
 }
 
+async function responseMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await response.clone().json();
+    return payload?.error ? String(payload.error) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function loginOperator(token: string): Promise<void> {
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    cache: "no-store",
+    body: JSON.stringify({ token }),
+  });
+  if (!response.ok) {
+    throw new Error(await responseMessage(response, `Operator login failed (${response.status})`));
+  }
+}
+
+export async function logoutOperator(): Promise<void> {
+  const response = await fetch("/api/auth/logout", {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(await responseMessage(response, `Operator logout failed (${response.status})`));
+  }
+}
+
+export async function getOperatorSession(): Promise<boolean> {
+  const response = await fetch("/api/auth/session", {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (response.status === 401 || response.status === 403) return false;
+  if (!response.ok) {
+    throw new Error(await responseMessage(response, `Session check failed (${response.status})`));
+  }
+  const payload = await response.json();
+  return payload?.authenticated === true;
+}
+
 export function installOperatorSessionFetch(): void {
   const nativeFetch = window.fetch.bind(window);
   let loginInFlight: Promise<boolean> | null = null;
 
-  async function login(): Promise<boolean> {
+  async function promptLogin(): Promise<boolean> {
     const token = window.prompt("Operator control token required");
     if (!token) return false;
 
@@ -41,14 +88,7 @@ export function installOperatorSessionFetch(): void {
     });
 
     if (!response.ok) {
-      let message = `Operator login failed (${response.status})`;
-      try {
-        const payload = await response.json();
-        if (payload?.error) message = String(payload.error);
-      } catch {
-        // Keep the status-based error when the response is not JSON.
-      }
-      window.alert(message);
+      window.alert(await responseMessage(response, `Operator login failed (${response.status})`));
       return false;
     }
     return true;
@@ -62,7 +102,7 @@ export function installOperatorSessionFetch(): void {
 
     if (!isControlSessionFailure(response) || !isPrivilegedMutation(input, init)) return response;
 
-    loginInFlight ||= login().finally(() => {
+    loginInFlight ||= promptLogin().finally(() => {
       loginInFlight = null;
     });
     const authenticated = await loginInFlight;
