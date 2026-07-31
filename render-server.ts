@@ -12,6 +12,7 @@ import replayHandler from "./api/replay";
 import liveJournalHandler from "./api/live-journal";
 import loginHandler from "./api/auth/login";
 import logoutHandler from "./api/auth/logout";
+import sessionHandler from "./api/auth/session";
 import { ControlAuthError, requireControlSession } from "./api/_lib/control-auth";
 
 const app = express();
@@ -30,11 +31,11 @@ app.get("/healthz", (_req, res) => {
 
 app.post("/api/auth/login", (req, res) => void loginHandler(req, res));
 app.post("/api/auth/logout", (req, res) => void logoutHandler(req, res));
+app.get("/api/auth/session", (req, res) => void sessionHandler(req, res));
 app.all("/api/replay/*", (req, res) => void replayHandler(req, res));
 app.all("/api/bot/toggle", (req, res) => void botToggleHandler(req, res));
 app.all("/api/scanner", (req, res) => void scannerHandler(req, res));
 app.get("/api/logs", (req, res) => void liveJournalHandler(req, res));
-// Support both the canonical BFF endpoint and the path used by the Risk & Controls UI.
 app.all("/api/risk-policy", (req, res) => void riskPolicyHandler(req, res));
 app.all("/api/risk/policy", (req, res) => void riskPolicyHandler(req, res));
 app.get("/api/account", (req, res) => {
