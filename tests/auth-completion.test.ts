@@ -19,13 +19,16 @@ test("Render generic mutation fallback requires and tags operator sessions", asy
   assert.ok(source.includes('code: "CONTROL_SESSION_INVALID"'));
 });
 
-test("Vercel blocks rewritten generic mutation routes", async () => {
-  const source = await read("middleware.ts");
-  assert.ok(source.includes('matcher: "/api/:path*"'));
-  assert.ok(source.includes('"/api/auth/login"'));
-  assert.ok(source.includes('"/api/auth/logout"'));
-  assert.ok(source.includes('"/api/bot/toggle"'));
-  assert.ok(source.includes("Legacy generic mutation endpoint is disabled"));
+test("Vercel exposes canonical auth routes including session verification", async () => {
+  const config = await read("vercel.json");
+  const middleware = await read("middleware.ts");
+  assert.ok(config.includes('"api/auth/session.ts"'));
+  assert.ok(config.includes('"source": "/api/auth/session"'));
+  assert.ok(middleware.includes('matcher: "/api/:path*"'));
+  assert.ok(middleware.includes('"/api/auth/login"'));
+  assert.ok(middleware.includes('"/api/auth/logout"'));
+  assert.ok(middleware.includes('"/api/bot/toggle"'));
+  assert.ok(middleware.includes("Legacy generic mutation endpoint is disabled"));
 });
 
 test("browser retries only tagged control-session failures", async () => {
@@ -40,6 +43,19 @@ test("browser retries only tagged control-session failures", async () => {
   assert.ok(!source.includes("localStorage"));
   assert.ok(!source.includes("sessionStorage"));
   assert.ok(!source.includes("VITE_FRONTEND_CONTROL_TOKEN"));
+});
+
+test("settings authentication uses server-verified HttpOnly session only", async () => {
+  const settings = await read("src/components/SettingsAndHealthView.tsx");
+  const sessionRoute = await read("api/auth/session.ts");
+  assert.ok(settings.includes("getOperatorSession"));
+  assert.ok(settings.includes("loginOperator"));
+  assert.ok(settings.includes("logoutOperator"));
+  assert.ok(settings.includes("It is never stored in localStorage"));
+  assert.ok(!settings.includes('localStorage.setItem("admin_token"'));
+  assert.ok(!settings.includes('localStorage.getItem("admin_token"'));
+  assert.ok(sessionRoute.includes("requireControlSession(req)"));
+  assert.ok(sessionRoute.includes('authenticated: true'));
 });
 
 test("bot toggle waits for the asynchronous authoritative state without repeating the mutation", async () => {
