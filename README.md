@@ -23,14 +23,17 @@ The browser never receives the Cloud Run administrator token, Bybit API credenti
 https://bybit-intraday-backend-608992045433.asia-south1.run.app
 ```
 
-`vercel.json` locks the public backend URL for all serverless BFF functions. The following secret variables must still be configured in Vercel:
+Configure the upstream as a **server-only Vercel environment variable**:
 
 ```text
+BACKEND_API_URL=https://bybit-intraday-backend-608992045433.asia-south1.run.app
 BACKEND_ADMIN_TOKEN=<exact Cloud Run ADMIN_TOKEN>
 FRONTEND_CONTROL_TOKEN=<separate operator login secret>
 ```
 
-Do not create any `VITE_*` variable containing credentials.
+`vercel.json` contains only build, function and rewrite configuration. It must not contain the Cloud Run URL or credentials because Vercel project configuration can participate in the browser build environment. `.env.example` is the deployment reference for the canonical server-side values.
+
+Do not create any `VITE_*` variable containing backend URLs, administrator tokens, Bybit credentials or database values.
 
 ## Runtime truth rules
 
