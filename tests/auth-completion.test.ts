@@ -19,13 +19,17 @@ test("production generic mutation fallback requires and tags operator sessions",
   assert.ok(source.includes('code: "CONTROL_SESSION_INVALID"'));
 });
 
-test("Vercel exposes canonical auth routes and locks the Cloud Run upstream", async () => {
+test("Vercel exposes canonical auth routes without leaking the Cloud Run upstream into build config", async () => {
   const config = await read("vercel.json");
   const middleware = await read("middleware.ts");
+  const toggle = await read("api/bot-toggle.ts");
+  const scanner = await read("api/scanner-live.ts");
   assert.ok(config.includes('"api/auth/session.ts"'));
   assert.ok(config.includes('"source": "/api/auth/session"'));
-  assert.ok(config.includes('"BACKEND_API_URL"'));
-  assert.ok(config.includes("bybit-intraday-backend-608992045433.asia-south1.run.app"));
+  assert.ok(!config.includes('"BACKEND_API_URL"'));
+  assert.ok(!config.includes("bybit-intraday-backend-608992045433.asia-south1.run.app"));
+  assert.ok(toggle.includes("bybit-intraday-backend-608992045433.asia-south1.run.app"));
+  assert.ok(scanner.includes("bybit-intraday-backend-608992045433.asia-south1.run.app"));
   assert.ok(middleware.includes('matcher: "/api/:path*"'));
   assert.ok(middleware.includes('"/api/auth/login"'));
   assert.ok(middleware.includes('"/api/auth/logout"'));
