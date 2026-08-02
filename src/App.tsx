@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Menu, ShieldCheck, Key } from "lucide-react";
+import { Menu, ShieldCheck } from "lucide-react";
 
 import {
   BotStatusResponse,
@@ -26,8 +26,10 @@ import { RiskAndControlsView } from "./components/RiskAndControlsView";
 import { SettingsAndHealthView } from "./components/SettingsAndHealthView";
 import { StrategyAnalyticsView } from "./components/StrategyAnalyticsView";
 import { HistoricalReplayView } from "./components/HistoricalReplayView";
-import { FrontendShellPage } from "./components/FrontendShellPage";
-import { OfflineBanner, ServerErrorAlert, UnauthorizedModal } from "./components/StateViews";
+import { OfflineBanner, ServerErrorAlert } from "./components/StateViews";
+
+const POSITION_CONTROL_UNAVAILABLE =
+  "Single-position Close and manual SL/TP updates are disabled until the canonical Cloud Run backend exposes verified endpoints.";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
@@ -47,7 +49,6 @@ export default function App() {
   const [isTogglingBot, setIsTogglingBot] = useState<boolean>(false);
   const [isOffline, setIsOffline] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [showUnauthorizedModal, setShowUnauthorizedModal] = useState<boolean>(false);
 
   const loadScannerData = useCallback(async () => {
     setScannerLoading(true);
@@ -64,14 +65,13 @@ export default function App() {
   const loadDashboardData = useCallback(async () => {
     try {
       setServerError(null);
-      const [st, acc, pos, life, kl, lg, scanData] = await Promise.all([
+      const [st, acc, pos, life, kl, lg] = await Promise.all([
         api.getStatus(),
         api.getAccount(),
         api.getPositions(),
         api.getOrderLifecycles(),
         api.getKlines(selectedSymbol, selectedTimeframe),
         api.getLogs("ALL"),
-        api.getScanner().catch(() => null),
       ]);
       setStatus(st);
       setAccount(acc);
@@ -79,23 +79,33 @@ export default function App() {
       setLifecycles(life);
       setKlines(kl);
       setLogs(lg);
-      if (scanData) setScannerData(scanData);
       setIsOffline(false);
-      if (st.authConfigured === false) setShowUnauthorizedModal(true);
+      if (st.authConfigured === false) {
+        setServerError(
+          "Vercel upstream authentication is missing or does not match the Cloud Run backend.",
+        );
+      }
     } catch (err: any) {
       console.error("Dashboard fetch error:", err);
       setIsOffline(true);
-      setServerError(err?.message || "Failed to sync with Bybit Demo Engine backend.");
+      setServerError(err?.message || "Failed to sync with the Google Cloud Run backend.");
     } finally {
       setLoading(false);
     }
   }, [selectedSymbol, selectedTimeframe]);
 
   useEffect(() => {
-    loadDashboardData();
-    const interval = setInterval(loadDashboardData, 3000);
-    return () => clearInterval(interval);
-  }, [loadDashboardData]);
+    void loadDashboardData();
+    void loadScannerData();
+
+    const dashboardInterval = window.setInterval(() => void loadDashboardData(), 10_000);
+    const scannerInterval = window.setInterval(() => void loadScannerData(), 30_000);
+
+    return () => {
+      window.clearInterval(dashboardInterval);
+      window.clearInterval(scannerInterval);
+    };
+  }, [loadDashboardData, loadScannerData]);
 
   const handleToggleBot = async (): Promise<{ isRunning: boolean; reason?: string }> => {
     if (isTogglingBot) {
@@ -128,23 +138,20 @@ export default function App() {
     }
   };
 
-  const handleChangeRouterMode = async (mode: string) => {
-    try {
-      await api.updateConfig({ routerMode: mode });
-      if (status) setStatus({ ...status, routerMode: mode });
-    } catch (err) {
-      console.error(err);
-    }
+  const handleChangeRouterMode = async (_mode: string) => {
+    setServerError(
+      "Router mode is controlled by the canonical Cloud Run backend and cannot be changed locally from the frontend.",
+    );
   };
 
-  const handleClosePosition = async (id: string) => {
-    await api.closePosition(id);
-    await loadDashboardData();
+  const handleClosePosition = async (_id: string) => {
+    setServerError(POSITION_CONTROL_UNAVAILABLE);
+    throw new Error(POSITION_CONTROL_UNAVAILABLE);
   };
 
-  const handleUpdateSLTP = async (id: string, sl?: number, tp?: number) => {
-    await api.updateSLTP(id, sl, tp);
-    await loadDashboardData();
+  const handleUpdateSLTP = async (_id: string, _sl?: number, _tp?: number) => {
+    setServerError(POSITION_CONTROL_UNAVAILABLE);
+    throw new Error(POSITION_CONTROL_UNAVAILABLE);
   };
 
   const handleRefreshLogs = async (filterVal: string) => {
@@ -153,12 +160,6 @@ export default function App() {
     } catch (err) {
       console.error(err);
     }
-  };
-
-  const handleSaveKeys = async (apiKey: string, apiSecret: string) => {
-    await api.updateConfig({ apiKey, apiSecret });
-    setShowUnauthorizedModal(false);
-    await loadDashboardData();
   };
 
   const badgeCounts = {
@@ -236,7 +237,6 @@ export default function App() {
           )}
 
           {activeTab === "strategy-analytics" && <StrategyAnalyticsView />}
-
           {activeTab === "historical-replay" && <HistoricalReplayView />}
 
           {activeTab === "risk-controls" && (
@@ -260,20 +260,11 @@ export default function App() {
         <footer className="mt-auto border-t border-slate-900 bg-[#0a0d14] py-2 px-4 text-center font-mono text-[11px] text-slate-500 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <ShieldCheck size={14} className="text-amber-400 shrink-0" />
-            <span>BYBIT DEMO INTRADAY TRADING BOT • V5 UNIFIED DEMO API</span>
+            <span>BYBIT DEMO INTRADAY TRADING BOT • GOOGLE CLOUD RUN BACKEND</span>
           </div>
-          <div className="flex items-center gap-3">
-            <span>Server Version: {status?.version || "v2.4.1-demo"}</span>
-            <span>•</span>
-            <button onClick={() => setShowUnauthorizedModal(true)} className="text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer flex items-center gap-1">
-              <Key size={12} />
-              <span>Demo API Keys</span>
-            </button>
-          </div>
+          <span>Server Version: {status?.version || "unavailable"}</span>
         </footer>
       </div>
-
-      {showUnauthorizedModal && <UnauthorizedModal onSaveKeys={handleSaveKeys} onDismiss={() => setShowUnauthorizedModal(false)} />}
     </div>
   );
 }

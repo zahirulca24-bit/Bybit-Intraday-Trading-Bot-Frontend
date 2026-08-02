@@ -11,10 +11,12 @@ class UpstreamError extends Error {
   }
 }
 
-const BACKEND_URL = (process.env.BACKEND_API_URL || "https://bybit-intraday-trading-bot.onrender.com").replace(/\/$/, "");
+const DEFAULT_BACKEND_URL = "https://bybit-intraday-backend-608992045433.asia-south1.run.app";
+const BACKEND_URL = (process.env.BACKEND_API_URL || DEFAULT_BACKEND_URL).replace(/\/$/, "");
 const ADMIN_TOKEN = (process.env.BACKEND_ADMIN_TOKEN || "").trim();
-const STATE_VERIFY_ATTEMPTS = 10;
+const STATE_VERIFY_ATTEMPTS = 6;
 const STATE_VERIFY_DELAY_MS = 500;
+const LEADER_RETRY_ATTEMPTS = 3;
 
 function sendJson(res: ResponseLike, status: number, payload: any): void {
   res.statusCode = status;
@@ -33,17 +35,54 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function backendJson(path: string, init: RequestInit = {}): Promise<any> {
-  if (!ADMIN_TOKEN) throw new UpstreamError(503, "Server is missing BACKEND_ADMIN_TOKEN.");
+  if (!ADMIN_TOKEN) throw new UpstreamError(503, "Vercel server is missing BACKEND_ADMIN_TOKEN.");
   const headers = new Headers(init.headers || {});
   headers.set("Accept", "application/json");
   headers.set("Authorization", `Bearer ${ADMIN_TOKEN}`);
   if (init.body !== undefined) headers.set("Content-Type", "application/json");
-  const response = await fetch(`${BACKEND_URL}${path}`, { ...init, headers, cache: "no-store", signal: AbortSignal.timeout(25_000) });
+  const response = await fetch(`${BACKEND_URL}${path}`, {
+    ...init,
+    headers,
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
   const text = await response.text();
   let payload: any = {};
-  try { payload = text ? JSON.parse(text) : {}; } catch { payload = { error: text }; }
-  if (!response.ok) throw new UpstreamError(response.status, textValue(payload?.error || payload?.reason || payload?.message, `Backend request failed (${response.status})`), payload);
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { error: text };
+  }
+  if (!response.ok) {
+    throw new UpstreamError(
+      response.status,
+      textValue(payload?.error || payload?.reason || payload?.message, `Backend request failed (${response.status})`),
+      payload,
+    );
+  }
   return payload;
+}
+
+function isStandbyResponse(error: unknown): boolean {
+  if (!(error instanceof UpstreamError) || error.status !== 503) return false;
+  const leadership = error.payload?.runtimeLeadership || error.payload?.upstream?.runtimeLeadership || {};
+  const status = textValue(leadership?.status, "").toLowerCase();
+  const reason = textValue(error.payload?.reason || error.message, "").toLowerCase();
+  return status === "standby" || reason.includes("not the automatic-execution leader");
+}
+
+async function mutateThroughLeader(path: string, body: string): Promise<any> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < LEADER_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      return await backendJson(path, { method: "POST", body });
+    } catch (error) {
+      lastError = error;
+      if (!isStandbyResponse(error) || attempt === LEADER_RETRY_ATTEMPTS - 1) throw error;
+      await sleep(350 * (attempt + 1));
+    }
+  }
+  throw lastError;
 }
 
 async function waitForBotState(expectedRunning: boolean): Promise<{ isRunning: boolean; status: any }> {
@@ -69,28 +108,47 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       throw new UpstreamError(405, "Method not allowed");
     }
     requireControlSession(req);
+
     const before = await backendJson("/api/bot/status");
     const bot = before?.bot || before || {};
     const wasRunning = bot?.enabled === true;
     const expectedRunning = !wasRunning;
+
     const mutation = wasRunning
-      ? await backendJson("/api/bot/stop", { method: "POST", body: "{}" })
-      : await backendJson("/api/bot/start", {
-          method: "POST",
-          body: JSON.stringify({ symbol: textValue(bot?.symbol, "BTCUSDT"), interval: textValue(bot?.interval, "5"), mode: textValue(bot?.mode, "conservative"), riskPerTradePct: 2.0 }),
-        });
-    if (mutation?.ok === false) throw new UpstreamError(409, textValue(mutation?.reason || mutation?.error, "Backend blocked bot state change"), mutation);
+      ? await mutateThroughLeader("/api/bot/stop", "{}")
+      : await mutateThroughLeader(
+          "/api/bot/start",
+          JSON.stringify({
+            symbol: textValue(bot?.symbol, "BTCUSDT"),
+            interval: textValue(bot?.interval, "5"),
+            mode: textValue(bot?.mode, "conservative"),
+            riskPerTradePct: 2.0,
+          }),
+        );
+
+    if (mutation?.ok === false) {
+      throw new UpstreamError(
+        409,
+        textValue(mutation?.reason || mutation?.error, "Backend blocked bot state change"),
+        mutation,
+      );
+    }
 
     const verified = await waitForBotState(expectedRunning);
     if (verified.isRunning !== expectedRunning) {
-      throw new UpstreamError(409, "Backend did not confirm the requested bot state within 5 seconds.", {
+      throw new UpstreamError(409, "Cloud Run backend did not confirm the requested bot state within 3 seconds.", {
         mutation,
         status: verified.status,
         expectedRunning,
       });
     }
 
-    sendJson(res, 200, { success: true, isRunning: verified.isRunning, authoritative: true, verifiedAt: Date.now() });
+    sendJson(res, 200, {
+      success: true,
+      isRunning: verified.isRunning,
+      authoritative: true,
+      verifiedAt: Date.now(),
+    });
   } catch (error: any) {
     if (error instanceof ControlAuthError) {
       res.setHeader("X-Control-Auth-Error", "session");
@@ -102,6 +160,10 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       return;
     }
     const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
-    sendJson(res, timeout ? 504 : 502, { error: timeout ? "Bybit Demo backend timed out." : textValue(error?.message, "Unable to reach Bybit Demo backend") });
+    sendJson(res, timeout ? 504 : 502, {
+      error: timeout
+        ? "Google Cloud Run backend timed out. Check backend readiness and retry."
+        : textValue(error?.message, "Unable to reach Google Cloud Run backend"),
+    });
   }
 }

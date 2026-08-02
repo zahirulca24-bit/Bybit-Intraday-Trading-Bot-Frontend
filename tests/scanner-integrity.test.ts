@@ -4,25 +4,33 @@ import test from "node:test";
 
 const read = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("scanner normalizes percent units before enforcing spread thresholds", async () => {
+test("scanner reads the canonical Cloud Run scanner endpoint", async () => {
   const source = await read("api/scanner-live.ts");
-  assert.ok(source.includes("function optionalPercent"));
-  assert.ok(source.includes("MAX_SPREAD_PCT = 0.14"));
-  assert.ok(source.includes("normalizedMarketSpreads"));
+  assert.ok(source.includes("bybit-intraday-backend-608992045433.asia-south1.run.app"));
+  assert.ok(source.includes("/api/bot/scanner?interval="));
+  assert.ok(source.includes("Authorization: `Bearer ${ADMIN_TOKEN}`"));
 });
 
-test("scanner fails closed when required integrity metrics are missing", async () => {
+test("scanner renders policy values returned by the backend", async () => {
   const source = await read("api/scanner-live.ts");
-  assert.ok(source.includes("Missing or unclosed 15m signal candle"));
-  assert.ok(source.includes("ATR 15m metric unavailable or non-positive"));
-  assert.ok(source.includes("Volume ratio below"));
-  assert.ok(source.includes('if (failures.length > 0) return "BLOCKED"'));
+  assert.ok(source.includes("const policy = universe?.policy || raw?.policy || {}"));
+  assert.ok(source.includes("normalSpreadThresholdPct: numberValue(policy?.normalSpreadPct)"));
+  assert.ok(source.includes("minTurnoverUsdt: numberValue(policy?.minimumTurnover)"));
+  assert.ok(source.includes("minGrossRR: numberValue(policy?.minimumGrossRr)"));
+  assert.ok(source.includes("maxCostToRiskLimitPct: numberValue(policy?.maximumCostRiskPct)"));
 });
 
-test("scanner reports degraded rows instead of counting every row complete", async () => {
+test("frontend does not apply a second scanner threshold policy", async () => {
   const source = await read("api/scanner-live.ts");
-  assert.ok(source.includes('dataQuality: {'));
-  assert.ok(source.includes('status: failures.length === 0 ? "PASS" : "DEGRADED"'));
-  assert.ok(source.includes('const completed = signals.filter'));
-  assert.ok(source.includes('failClosedIntegrity: true'));
+  assert.ok(!source.includes("MAX_SPREAD_PCT ="));
+  assert.ok(!source.includes("MIN_VOLUME_RATIO ="));
+  assert.ok(!source.includes("integrityFailures("));
+  assert.ok(source.includes('if (signal === "Buy" || signal === "Sell") return "PENDING_RISK"'));
+});
+
+test("missing frontend evidence is not promoted to executable", async () => {
+  const source = await read("api/scanner-live.ts");
+  assert.ok(source.includes('if (signal === "Blocked") return "BLOCKED"'));
+  assert.ok(source.includes('if (signal === "Error") return "ERROR"'));
+  assert.ok(source.includes('return "NOT_EXECUTABLE"'));
 });
