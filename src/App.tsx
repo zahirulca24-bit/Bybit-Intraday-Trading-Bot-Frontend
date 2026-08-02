@@ -82,7 +82,7 @@ export default function App() {
       setIsOffline(false);
       if (st.authConfigured === false) {
         setServerError(
-          "Vercel BACKEND_ADMIN_TOKEN is missing or does not match the Cloud Run ADMIN_TOKEN.",
+          "Vercel upstream authentication is missing or does not match the Cloud Run backend.",
         );
       }
     } catch (err: any) {
