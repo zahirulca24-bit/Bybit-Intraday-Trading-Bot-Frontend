@@ -4,9 +4,29 @@ type AnyRecord = Record<string, any>;
 type RequestLike = any;
 type ResponseLike = any;
 
-const BACKEND_URL = (process.env.BACKEND_API_URL || "https://bybit-intraday-trading-bot.onrender.com").replace(/\/$/, "");
+const DEFAULT_BACKEND_URL = "https://bybit-intraday-backend-608992045433.asia-south1.run.app";
+const BACKEND_URL = (process.env.BACKEND_API_URL || DEFAULT_BACKEND_URL).replace(/\/$/, "");
 const ADMIN_TOKEN = (process.env.BACKEND_ADMIN_TOKEN || "").trim();
 const LOCKED_DAILY_NET_LOSS_PCT = 5;
+
+const EXECUTION_EVENT_MARKERS = [
+  "execution_command",
+  "submission_intent",
+  "order_acknowledged",
+  "order_rejected",
+  "submission_unknown",
+  "resolution_",
+  "protection_verified",
+  "fill",
+  "management_",
+  "tp1",
+  "tp2",
+  "break_even",
+  "trailing",
+  "position_closed",
+  "manual_close",
+  "exchange_close",
+];
 
 function sendJson(res: ResponseLike, status: number, payload: any): void {
   res.status(status);
@@ -20,12 +40,25 @@ function num(value: any, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function optionalNumber(...values: any[]): number | null {
+  const value = values.find((candidate) => candidate !== undefined && candidate !== null && candidate !== "");
+  if (value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function text(value: any, fallback = ""): string {
   return value === null || value === undefined ? fallback : String(value);
 }
 
 function first(...values: any[]): any {
   return values.find((value) => value !== undefined && value !== null && value !== "");
+}
+
+function timestampIso(value: any): string {
+  const numeric = num(value, 0);
+  const millis = numeric > 0 ? (numeric < 10_000_000_000 ? numeric * 1000 : numeric) : Date.now();
+  return new Date(millis).toISOString();
 }
 
 async function backendJson(path: string): Promise<any> {
@@ -45,18 +78,36 @@ function positionRows(raw: AnyRecord): AnyRecord[] {
   return Array.isArray(rows) ? rows : [];
 }
 
-function lifecycleStatus(entry: AnyRecord): "PASS" | "WAIT" | "BLOCKED" | "ERROR" | "DEGRADED" {
+function executionEvent(entry: AnyRecord): boolean {
+  const event = text(entry?.event).trim().toLowerCase();
+  return EXECUTION_EVENT_MARKERS.some((marker) => event.includes(marker));
+}
+
+function explicitFailure(entry: AnyRecord): boolean {
+  const payload = entry?.payload || {};
+  const result = payload?.result || {};
+  const haystack = `${entry?.event || ""} ${payload?.reason || ""} ${payload?.message || ""} ${result?.retMsg || ""}`.toLowerCase();
+  return haystack.includes("error")
+    || haystack.includes("failed")
+    || haystack.includes("rejected")
+    || haystack.includes("cancelled")
+    || (result?.retCode !== undefined && num(result.retCode, 0) !== 0);
+}
+
+function lifecycleStatus(entry: AnyRecord, hasSuccessEvidence: boolean): "PASS" | "WAIT" | "BLOCKED" | "ERROR" | "DEGRADED" {
   const payload = entry?.payload || {};
   const result = payload?.result || {};
   const haystack = `${entry?.event || ""} ${payload?.reason || ""} ${payload?.message || ""} ${result?.retMsg || ""}`.toLowerCase();
   if (haystack.includes("degraded")) return "DEGRADED";
   if (haystack.includes("blocked") || haystack.includes("cancelled") || haystack.includes("rejected")) return "BLOCKED";
-  if (haystack.includes("wait") || haystack.includes("pending") || haystack.includes("queued")) return "WAIT";
-  if (haystack.includes("error") || haystack.includes("failed") || num(result?.retCode, 0) !== 0) return "ERROR";
-  return "PASS";
+  if (explicitFailure(entry)) return "ERROR";
+  if (haystack.includes("unknown") || haystack.includes("pending") || haystack.includes("queued") || haystack.includes("reserved")) return "WAIT";
+  return hasSuccessEvidence ? "PASS" : "WAIT";
 }
 
-function adaptLifecycle(entry: AnyRecord, index: number): AnyRecord {
+function adaptLifecycle(entry: AnyRecord, index: number): AnyRecord | null {
+  if (!executionEvent(entry)) return null;
+
   const p = entry?.payload || {};
   const evidence = p?.evidence || p?.executionEvidence || p?.sizingEvidence || {};
   const signalEvidence = p?.signalEvidence || p?.signal || p?.setup || evidence?.signal || {};
@@ -64,49 +115,57 @@ function adaptLifecycle(entry: AnyRecord, index: number): AnyRecord {
   const protection = p?.protection || p?.exitPlan || p?.riskPlan || evidence?.protection || {};
   const result = p?.result || {};
   const orderResult = result?.result || p?.order || {};
-  const grade = text(first(p?.grade, p?.qualityGrade, signalEvidence?.grade, signalEvidence?.qualityGrade, evidence?.grade), "");
-  const confidence = num(first(p?.confidence, p?.confidencePct, signalEvidence?.confidence, signalEvidence?.confidencePct, evidence?.confidence), 0);
-  const riskAmount = num(first(p?.riskAmountUsdt, p?.riskBudgetUsdt, sizing?.riskAmountUsdt, sizing?.riskBudgetUsdt, sizing?.actualRiskUsdt, evidence?.riskAmountUsdt, evidence?.actualRiskUsdt), 0);
-  const notional = num(first(p?.notionalUsdt, p?.sizeUsdt, sizing?.notionalUsdt, sizing?.positionNotionalUsdt, sizing?.finalNotionalUsdt, evidence?.notionalUsdt, orderResult?.orderValue), 0);
-  const stopLoss = num(first(p?.stopLoss, p?.stopLossPrice, protection?.stopLoss, protection?.stopLossPrice, protection?.sl, evidence?.stopLoss), 0);
-  const takeProfit = num(first(p?.takeProfit, p?.takeProfitPrice, protection?.takeProfit, protection?.takeProfitPrice, protection?.tp2Price, protection?.tp1Price, evidence?.takeProfit), 0);
+  const event = text(entry?.event).toLowerCase();
+  const orderId = text(first(orderResult?.orderId, p?.orderId, evidence?.orderId), "");
+  const orderLinkId = text(first(orderResult?.orderLinkId, p?.orderLinkId, evidence?.orderLinkId), "");
+  const symbol = text(first(p?.symbol, p?.requestedSymbol, signalEvidence?.symbol, orderResult?.symbol), "");
+  const entryPrice = optionalNumber(p?.price, p?.entryPrice, signalEvidence?.price, signalEvidence?.entryPrice, orderResult?.avgPrice, evidence?.avgPrice);
+  const notional = optionalNumber(p?.notionalUsdt, p?.sizeUsdt, sizing?.notionalUsdt, sizing?.positionNotionalUsdt, sizing?.finalNotionalUsdt, evidence?.notionalUsdt, orderResult?.orderValue);
+  const leverage = optionalNumber(p?.leverage, sizing?.leverage, evidence?.leverage);
+  const stopLoss = optionalNumber(p?.stopLoss, p?.stopLossPrice, protection?.stopLoss, protection?.stopLossPrice, protection?.sl, evidence?.stopLoss);
+  const takeProfit = optionalNumber(p?.takeProfit, p?.takeProfitPrice, protection?.takeProfit, protection?.takeProfitPrice, protection?.tp2Price, protection?.tp1Price, evidence?.takeProfit);
+  const hasOrderIdentity = Boolean(orderId || orderLinkId);
+  const hasFillEvidence = event.includes("fill") || event.includes("resolution_filled") || Boolean(p?.fill || evidence?.fill || evidence?.executions);
+  const hasProtectionEvidence = event.includes("protection_verified") && stopLoss !== null && stopLoss > 0 && takeProfit !== null && takeProfit > 0;
+  const hasManagementEvidence = ["tp1", "tp2", "break_even", "trailing", "position_closed", "manual_close", "exchange_close"].some((marker) => event.includes(marker));
+  const hasSuccessEvidence = hasOrderIdentity && (hasFillEvidence || hasProtectionEvidence || hasManagementEvidence || event.includes("order_acknowledged"));
+  const status = lifecycleStatus(entry, hasSuccessEvidence);
+  const reason = text(first(p?.reason, p?.message, result?.retMsg, entry?.event), "Backend execution lifecycle event");
   const sideText = text(first(p?.side, signalEvidence?.side, p?.signal, orderResult?.side), "BUY").toUpperCase();
-  const status = lifecycleStatus(entry);
-  const reason = text(first(p?.reason, p?.message, result?.retMsg, entry?.event), "Canonical backend lifecycle event");
 
   return {
-    id: text(first(orderResult?.orderId, orderResult?.orderLinkId, p?.clientOrderId, entry?.id), `${entry?.time || Date.now()}-${index}`),
-    timestamp: new Date(num(first(entry?.time, entry?.timestamp), Date.now())).toISOString(),
-    symbol: text(first(p?.symbol, p?.requestedSymbol, signalEvidence?.symbol, orderResult?.symbol), "UNKNOWN"),
+    id: text(first(orderId, orderLinkId, p?.clientOrderId, entry?.id), `${entry?.time || Date.now()}-${index}`),
+    timestamp: timestampIso(first(entry?.time, entry?.timestamp)),
+    symbol: symbol || "UNAVAILABLE",
     side: sideText.includes("SELL") || sideText.includes("SHORT") ? "SHORT" : "LONG",
     timeframe: text(first(p?.interval, p?.timeframe, signalEvidence?.timeframe), "5m"),
     signal: {
-      price: num(first(p?.price, p?.entryPrice, signalEvidence?.price, signalEvidence?.entryPrice, orderResult?.avgPrice), 0),
-      condition: grade ? `${grade} grade · ${reason}` : reason,
-      confidence,
-      scanScore: num(first(p?.score, p?.scanScore, signalEvidence?.score, signalEvidence?.scanScore), 0),
-      grade,
-      riskAmountUsdt: riskAmount,
+      price: entryPrice,
+      condition: reason,
+      confidence: optionalNumber(p?.confidence, p?.confidencePct, signalEvidence?.confidence, signalEvidence?.confidencePct),
+      scanScore: optionalNumber(p?.score, p?.scanScore, signalEvidence?.score, signalEvidence?.scanScore),
+      grade: text(first(p?.grade, p?.qualityGrade, signalEvidence?.grade, signalEvidence?.qualityGrade), ""),
     },
     guard: {
       status,
-      checksPassed: status === "PASS" ? ["Canonical backend accepted lifecycle event"] : [],
+      checksPassed: status === "PASS" ? ["Verified backend order/fill/protection evidence"] : [],
       blockedReason: status === "PASS" ? null : reason,
     },
     order: {
-      type: text(first(orderResult?.orderType, p?.orderType), "MARKET"),
+      type: text(first(orderResult?.orderType, p?.orderType), "BACKEND_MANAGED"),
       sizeUsdt: notional,
-      leverage: num(first(p?.leverage, sizing?.leverage, evidence?.leverage), 0),
+      leverage,
       slippageTolerance: text(first(p?.slippageTolerance, sizing?.slippageTolerance), "Backend controlled"),
-      riskAmountUsdt: riskAmount,
     },
     protection: {
       stopLoss,
       takeProfit,
-      trailingStop: text(first(protection?.trailingStop, protection?.trailingRule, p?.trailingStop), "TP2 verified → 0.5R trail"),
+      trailingStop: text(first(protection?.trailingStop, protection?.trailingRule, p?.trailingStop), "Backend managed"),
     },
     finalStatus: status,
     failureReason: status === "PASS" ? null : reason,
+    evidenceComplete: hasSuccessEvidence,
+    backendEvent: text(entry?.event, "unknown"),
   };
 }
 
@@ -156,9 +215,14 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     }
 
     if (mode === "lifecycle") {
-      const raw = await backendJson("/api/bot/journal?limit=50");
+      const raw = await backendJson("/api/bot/journal?limit=100");
       const entries = Array.isArray(raw?.journal) ? raw.journal : [];
-      sendJson(res, 200, entries.slice().reverse().map(adaptLifecycle));
+      const lifecycle = entries
+        .slice()
+        .reverse()
+        .map(adaptLifecycle)
+        .filter((entry): entry is AnyRecord => entry !== null);
+      sendJson(res, 200, lifecycle);
       return;
     }
 
