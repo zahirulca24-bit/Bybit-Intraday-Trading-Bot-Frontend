@@ -8,6 +8,7 @@ import scannerHandler from "./api/scanner-live";
 import analyticsHandler from "./api/analytics";
 import riskPolicyHandler from "./api/risk-policy";
 import dashboardTruthHandler from "./api/dashboard-truth";
+import executionTruthHandler from "./api/execution-truth";
 import replayHandler from "./api/replay";
 import liveJournalHandler from "./api/live-journal";
 import loginHandler from "./api/auth/login";
@@ -35,6 +36,7 @@ app.get("/api/auth/session", (req, res) => void sessionHandler(req, res));
 app.all("/api/replay/*", (req, res) => void replayHandler(req, res));
 app.all("/api/bot/toggle", (req, res) => void botToggleHandler(req, res));
 app.all("/api/scanner", (req, res) => void scannerHandler(req, res));
+app.get("/api/execution-truth", (req, res) => void executionTruthHandler(req, res));
 app.get("/api/logs", (req, res) => void liveJournalHandler(req, res));
 app.all("/api/risk-policy", (req, res) => void riskPolicyHandler(req, res));
 app.all("/api/risk/policy", (req, res) => void riskPolicyHandler(req, res));
@@ -74,9 +76,7 @@ app.use(express.static(distPath, {
   index: false,
   maxAge: "1h",
   setHeaders(res, filePath) {
-    if (filePath.endsWith("index.html")) {
-      res.setHeader("Cache-Control", "no-store");
-    }
+    if (filePath.endsWith("index.html")) res.setHeader("Cache-Control", "no-store");
   },
 }));
 
