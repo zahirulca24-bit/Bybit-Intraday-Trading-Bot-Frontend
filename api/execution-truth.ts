@@ -108,14 +108,15 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       backendJson("/api/durable-state/status"),
     ]);
 
-    const daily = rowsFrom(symbols?.dailyTop100, symbols?.top100, symbols?.daily?.rows);
-    const fourHour = rowsFrom(symbols?.fourHourTop50, symbols?.top50, symbols?.fourHour?.rows);
-    const oneHour = rowsFrom(symbols?.oneHourTop20, symbols?.top20, symbols?.activeSymbols, symbols?.rows);
-    const classified = rowsFrom(setups?.classified15m, setups?.classifications, setups?.rows);
-    const confirmed = rowsFrom(setups?.confirmed5m, setups?.confirmed, setups?.pendingHandoff, setups?.queue);
-    const riskRows = rowsFrom(execution?.riskRows, execution?.risk?.rows, execution?.riskApproved);
-    const sizingRows = rowsFrom(execution?.sizingRows, execution?.sizing?.rows, execution?.approvedSizingQueue);
-    const outboxRows = rowsFrom(execution?.executionCommands, execution?.commands, execution?.outbox?.rows, execution?.rows);
+    const runtime = status?.runtime || {};
+    const daily = rowsFrom(runtime?.dailyUniverse?.rows, symbols?.dailyTop100, symbols?.top100, symbols?.daily?.rows);
+    const fourHour = rowsFrom(runtime?.fourHourDirectionalPool?.rows, symbols?.fourHourTop50, symbols?.top50, symbols?.fourHour?.rows);
+    const oneHour = rowsFrom(runtime?.hourlyWatchlist?.rows, symbols?.oneHourTop20, symbols?.top20, symbols?.activeSymbols, symbols?.rows);
+    const classified = rowsFrom(runtime?.fifteenMinuteStrategyClassification?.rows, setups?.classified15m, setups?.classifications, setups?.rows);
+    const confirmed = rowsFrom(runtime?.fiveMinuteEntryConfirmation?.rows, setups?.confirmed5m, setups?.confirmed, setups?.pendingHandoff, setups?.queue);
+    const riskRows = rowsFrom(runtime?.authoritativeEntryRisk?.rows, execution?.riskRows, execution?.risk?.rows, execution?.riskApproved);
+    const sizingRows = rowsFrom(runtime?.positionSizingMargin?.rows, execution?.sizingRows, execution?.sizing?.rows, execution?.approvedSizingQueue);
+    const outboxRows = rowsFrom(runtime?.executionCommandOutbox?.rows, execution?.executionCommands, execution?.commands, execution?.outbox?.rows, execution?.rows);
     const commands = outboxRows.map(normalizeCommand);
     const activeCommands = commands.filter((row) => !["CLOSED", "FAILED"].includes(row.state));
     const durable = normalizeDurable(status, execution, durableStatus);
