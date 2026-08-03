@@ -6,6 +6,7 @@
   "functions": {
     "api/index.ts": { "maxDuration": 30 },
     "api/scanner-live.ts": { "maxDuration": 30 },
+    "api/execution-truth.ts": { "maxDuration": 30 },
     "api/bot-toggle.ts": { "maxDuration": 30 },
     "api/analytics.ts": { "maxDuration": 30 },
     "api/risk-policy.ts": { "maxDuration": 30 },
@@ -18,6 +19,7 @@
     { "source": "/api/auth/logout", "destination": "/api/auth/logout" },
     { "source": "/api/auth/session", "destination": "/api/auth/session" },
     { "source": "/api/scanner", "destination": "/api/scanner-live" },
+    { "source": "/api/execution-truth", "destination": "/api/execution-truth" },
     { "source": "/api/bot/toggle", "destination": "/api/bot-toggle" },
     { "source": "/api/risk/policy", "destination": "/api/risk-policy" },
     { "source": "/api/analytics/:path*", "destination": "/api/analytics?path=:path*" },
