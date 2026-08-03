@@ -45,6 +45,21 @@ async function backendJson(path: string): Promise<any> {
   return body;
 }
 
+function normalizeDurable(status: AnyRecord, execution: AnyRecord): AnyRecord {
+  const source = execution?.claimStore || status?.execution?.claimStore || status?.claimStore || {};
+  const backend = text(source?.backend || source?.store || source?.driver || status?.durableBackend, "UNKNOWN").toUpperCase();
+  const degraded = Boolean(source?.degraded ?? status?.stateDegraded ?? status?.durableState === "DEGRADED");
+  const restartSafe = Boolean(source?.restartSafe ?? status?.restartSafe);
+  const verified = backend === "POSTGRESQL" && restartSafe && !degraded;
+  return {
+    backend,
+    restartSafe,
+    degraded,
+    verified,
+    reason: text(source?.reason || source?.error || status?.durableError, verified ? "PostgreSQL restart-safe persistence verified" : "Durable persistence not fully verified"),
+  };
+}
+
 function normalizeCommand(row: AnyRecord, index: number): AnyRecord {
   const payload = row?.payload || row?.commandPayload || row?.immutablePayload || {};
   const runtime = row?.runtimeState || row?.runtime_state || payload?.runtimeState || {};
@@ -100,6 +115,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const outboxRows = rowsFrom(execution?.executionCommands, execution?.commands, execution?.outbox?.rows, execution?.rows);
     const commands = outboxRows.map(normalizeCommand);
     const activeCommands = commands.filter((row) => !["CLOSED", "FAILED"].includes(row.state));
+    const durable = normalizeDurable(status, execution);
 
     const stages = [
       stage("Daily Top100", daily.length ? "PASS" : "WAIT", daily.length || null, daily.length ? `${daily.length} symbols selected` : "Waiting for daily universe snapshot"),
@@ -109,7 +125,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       stage("5M Confirmation", confirmed.length ? "PASS" : classified.length ? "WAIT" : "NOT_REACHED", confirmed.length || null, confirmed.length ? `${confirmed.length} confirmed candidate(s)` : "Waiting for closed 5M confirmation"),
       stage("Risk Verdict", riskRows.length ? "PASS" : confirmed.length ? "RUNNING" : "NOT_REACHED", riskRows.length || null, riskRows.length ? `${riskRows.length} risk result(s)` : "Risk engine not reached"),
       stage("Sizing Verdict", sizingRows.length ? "PASS" : riskRows.length ? "RUNNING" : "NOT_REACHED", sizingRows.length || null, sizingRows.length ? `${sizingRows.length} sizing result(s)` : "Sizing engine not reached"),
-      stage("PostgreSQL Outbox", commands.length ? "PASS" : sizingRows.length ? "RUNNING" : "NOT_REACHED", commands.length || null, commands.length ? `${commands.length} durable command(s)` : "No execution command published"),
+      stage("PostgreSQL Outbox", commands.length && durable.verified ? "PASS" : commands.length ? "BLOCKED" : sizingRows.length ? "RUNNING" : "NOT_REACHED", commands.length || null, commands.length ? (durable.verified ? `${commands.length} durable command(s)` : "Commands exist but PostgreSQL durability is unverified") : "No execution command published"),
       stage("Node Execution", commands.some((row) => ["ORDER_PENDING", "PARTIALLY_FILLED", "MANAGING", "CLOSING", "CLOSED"].includes(row.state)) ? "PASS" : activeCommands.length ? "RUNNING" : "NOT_REACHED", activeCommands.length || null, activeCommands.length ? `${activeCommands.length} active Node command(s)` : "No active Node command"),
       stage("Trade Management", commands.some((row) => ["MANAGING", "CLOSING", "CLOSED"].includes(row.state)) ? "PASS" : commands.some((row) => row.state === "PARTIALLY_FILLED") ? "RUNNING" : "NOT_REACHED", null, "TP1 40% at 1.5R → break-even → TP2 30% at 2R → 30% runner with 0.5R trail"),
     ];
@@ -120,7 +136,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       backend: "GOOGLE_CLOUD_RUN",
       bybitMode: "BYBIT_DEMO",
       connected: Boolean(status?.executionConnected ?? status?.ok ?? execution?.ok),
-      durable: execution?.claimStore || status?.execution?.claimStore || status?.claimStore || null,
+      durable,
       stages,
       commands,
       slots: [1, 2, 3].map((slotId) => ({ slotId, command: activeCommands.find((row) => row.slotId === slotId) || null })),
@@ -136,7 +152,6 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
         tp2: { r: 2, closePct: 30 },
         runner: { remainingPct: 30, trailingR: 0.5 },
       },
-      rawStatus: status,
     });
   } catch (error: any) {
     sendJson(res, 502, { error: text(error?.message, "Unable to load canonical execution truth") });
