@@ -45,8 +45,9 @@ async function backendJson(path: string): Promise<any> {
   return body;
 }
 
-function normalizeDurable(status: AnyRecord, execution: AnyRecord): AnyRecord {
-  const source = execution?.claimStore || status?.execution?.claimStore || status?.claimStore || {};
+function normalizeDurable(status: AnyRecord, execution: AnyRecord, durableStatus: AnyRecord): AnyRecord {
+  const source = durableStatus?.durableState || durableStatus?.status || durableStatus
+    || execution?.claimStore || status?.execution?.claimStore || status?.claimStore || {};
   const backend = text(source?.backend || source?.store || source?.driver || status?.durableBackend, "UNKNOWN").toUpperCase();
   const degraded = Boolean(source?.degraded ?? status?.stateDegraded ?? status?.durableState === "DEGRADED");
   const restartSafe = Boolean(source?.restartSafe ?? status?.restartSafe);
@@ -56,6 +57,7 @@ function normalizeDurable(status: AnyRecord, execution: AnyRecord): AnyRecord {
     restartSafe,
     degraded,
     verified,
+    migrationVersion: source?.migrationVersion ?? null,
     reason: text(source?.reason || source?.error || status?.durableError, verified ? "PostgreSQL restart-safe persistence verified" : "Durable persistence not fully verified"),
   };
 }
@@ -98,11 +100,12 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
   }
 
   try {
-    const [status, symbols, setups, execution] = await Promise.all([
+    const [status, symbols, setups, execution, durableStatus] = await Promise.all([
       backendJson("/api/workers/status"),
       backendJson("/api/workers/symbols"),
       backendJson("/api/workers/setups"),
       backendJson("/api/workers/execution"),
+      backendJson("/api/durable-state/status"),
     ]);
 
     const daily = rowsFrom(symbols?.dailyTop100, symbols?.top100, symbols?.daily?.rows);
@@ -115,7 +118,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const outboxRows = rowsFrom(execution?.executionCommands, execution?.commands, execution?.outbox?.rows, execution?.rows);
     const commands = outboxRows.map(normalizeCommand);
     const activeCommands = commands.filter((row) => !["CLOSED", "FAILED"].includes(row.state));
-    const durable = normalizeDurable(status, execution);
+    const durable = normalizeDurable(status, execution, durableStatus);
 
     const stages = [
       stage("Daily Top100", daily.length ? "PASS" : "WAIT", daily.length || null, daily.length ? `${daily.length} symbols selected` : "Waiting for daily universe snapshot"),
