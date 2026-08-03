@@ -4,6 +4,38 @@ Production Vite + React control center for the Bybit Demo intraday trading backe
 
 > **Environment policy:** Bybit Demo only. This project does not support Bybit Testnet, paper trading, live-money trading, or browser-side trading logic.
 
+## Current project update
+
+**Date:** 04 August 2026  
+**Day:** Tuesday  
+**Status:** Backend runtime recovery verified; frontend truth-consolidation code merged; Vercel production deployment remains pending.
+
+### Verified today
+
+- Backend Cloud Run latest revision is receiving 100% traffic.
+- PostgreSQL durable state is healthy: PostgreSQL backend, migration version 5, restart-safe, not degraded.
+- Runtime leadership recovery is working and the scanner worker is running.
+- Frontend PR #14 was merged to consolidate Settings health, staged pipeline truth, and lifecycle evidence.
+- GitHub frontend verification checks passed.
+
+### Remaining blocker
+
+The merged frontend build has not reached the production Vercel site because Vercel fails during the deployment-output phase after a successful build. The current live site therefore still shows the previous UI state:
+
+- Settings & Health displays `UNKNOWN / DEGRADED` instead of the healthy PostgreSQL truth.
+- Daily Top100 remains `WAIT` in the authoritative pipeline.
+- Legacy zero-value lifecycle rows can still appear as `PASS`.
+
+Do not treat the current production UI as proof that PR #14 failed. Production acceptance is pending a successful Vercel deployment and a new live screenshot verification.
+
+### Next session
+
+1. Confirm the exact Vercel deployment failure reason or account deployment limit.
+2. Redeploy the merged `main` branch after the Vercel restriction clears.
+3. Verify live `/api/status`, `/api/execution-truth`, and `/api/orders/lifecycle` responses.
+4. Recheck Settings & Health, Scanner pipeline, and Dashboard lifecycle cards.
+5. Continue Step 12 only after the production frontend matches canonical backend truth.
+
 ## Production architecture
 
 ```text
