@@ -12,6 +12,13 @@ test("durable execution truth is verified only for healthy restart-safe PostgreS
   assert.ok(endpoint.includes('commands.length && durable.verified ? "PASS"'));
 });
 
+test("canonical durable state is fetched server-side with the existing authenticated backend client", () => {
+  assert.ok(endpoint.includes('backendJson("/api/durable-state/status")'));
+  assert.ok(endpoint.includes("normalizeDurable(status, execution, durableStatus)"));
+  assert.ok(endpoint.includes("durableStatus?.durableState || durableStatus?.status || durableStatus"));
+  assert.ok(endpoint.includes("migrationVersion: source?.migrationVersion ?? null"));
+});
+
 test("stale or failed truth refresh cannot remain visually connected", () => {
   assert.ok(component.includes("ageSeconds > 20"));
   assert.ok(component.includes("Boolean(error)"));
