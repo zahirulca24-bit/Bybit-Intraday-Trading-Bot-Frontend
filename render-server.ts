@@ -9,6 +9,8 @@ import analyticsHandler from "./api/analytics";
 import riskPolicyHandler from "./api/risk-policy";
 import dashboardTruthHandler from "./api/dashboard-truth";
 import executionTruthHandler from "./api/execution-truth";
+import statusTruthHandler from "./api/status-truth";
+import lifecycleTruthHandler from "./api/lifecycle-truth";
 import replayHandler from "./api/replay";
 import liveJournalHandler from "./api/live-journal";
 import loginHandler from "./api/auth/login";
@@ -17,7 +19,7 @@ import sessionHandler from "./api/auth/session";
 import { ControlAuthError, requireControlSession } from "./api/_lib/control-auth";
 
 const app = express();
-const port = Number(process.env.PORT || 10000);
+const port = Number(process.env.PORT || 8080);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const distPath = path.join(__dirname, "dist");
@@ -35,6 +37,7 @@ app.post("/api/auth/logout", (req, res) => void logoutHandler(req, res));
 app.get("/api/auth/session", (req, res) => void sessionHandler(req, res));
 app.all("/api/replay/*", (req, res) => void replayHandler(req, res));
 app.all("/api/bot/toggle", (req, res) => void botToggleHandler(req, res));
+app.get("/api/status", (req, res) => void statusTruthHandler(req, res));
 app.all("/api/scanner", (req, res) => void scannerHandler(req, res));
 app.get("/api/execution-truth", (req, res) => void executionTruthHandler(req, res));
 app.get("/api/logs", (req, res) => void liveJournalHandler(req, res));
@@ -44,10 +47,7 @@ app.get("/api/account", (req, res) => {
   req.query = { ...req.query, mode: "account" };
   void dashboardTruthHandler(req, res);
 });
-app.get("/api/orders/lifecycle", (req, res) => {
-  req.query = { ...req.query, mode: "lifecycle" };
-  void dashboardTruthHandler(req, res);
-});
+app.get("/api/orders/lifecycle", (req, res) => void lifecycleTruthHandler(req, res));
 app.all("/api/analytics", (req, res) => void analyticsHandler(req, res));
 app.all("/api/analytics/*", (req, res) => {
   const analyticsPath = req.path.replace(/^\/api\/analytics\/?/, "");
@@ -85,6 +85,20 @@ app.get("*", (_req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-app.listen(port, "0.0.0.0", () => {
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`Bybit frontend BFF listening on 0.0.0.0:${port}`);
 });
+
+function shutdown(signal: string): void {
+  console.log(`${signal} received; closing frontend BFF.`);
+  server.close((error) => {
+    if (error) {
+      console.error("Unable to close frontend BFF cleanly:", error);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
