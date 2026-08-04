@@ -2,7 +2,7 @@ FROM node:22-alpine AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts --no-audit --no-fund
+RUN npm install --ignore-scripts --no-audit --no-fund
 
 COPY . .
 RUN npm run typecheck && npm run build
@@ -14,7 +14,7 @@ ENV PORT=8080
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund \
     && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
