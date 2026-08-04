@@ -1,10 +1,19 @@
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const SUCCESS_MARKER = "Historical Replay Render frontend E2E passed.";
 const HARD_TIMEOUT_MS = 180_000;
+const truthShim = fileURLToPath(new URL("./backend-truth-fetch-shim.mjs", import.meta.url));
+const inheritedNodeOptions = String(process.env.NODE_OPTIONS || "").trim();
+const nodeOptions = [inheritedNodeOptions, `--import=${truthShim}`].filter(Boolean).join(" ");
+
 const child = spawn(process.execPath, ["e2e/run-e2e.mjs"], {
   cwd: process.cwd(),
-  env: process.env,
+  env: {
+    ...process.env,
+    NODE_OPTIONS: nodeOptions,
+    REPLAY_E2E_TRUTH_SHIM: "1",
+  },
   stdio: ["ignore", "pipe", "pipe"],
 });
 
