@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const renderServer = readFileSync(new URL("../render-server.ts", import.meta.url), "utf8");
+const renderServer = readFileSync(new URL("../cloud-run-server.ts", import.meta.url), "utf8");
 const devServer = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8");
 
