@@ -39,6 +39,16 @@ test("existing Historical Replay controls remain mounted with Phase 2 workspace"
   assert.ok(app.includes("<HistoricalReplayPhase2View />"));
 });
 
+test("visualization follows the authoritative Phase 1 selected session", () => {
+  assert.ok(workspace.includes('data-testid="replay-selected-id"'));
+  assert.ok(workspace.includes("selectedSessionId(root)"));
+  assert.ok(workspace.includes("MutationObserver"));
+  assert.ok(workspace.includes("setRefreshKey((value) => value + 1)"));
+  assert.ok(!workspace.includes("api.listReplaySessions"));
+  assert.ok(!workspace.includes("setInterval"));
+  assert.ok(!workspace.includes("replay-visualization-session-select"));
+});
+
 test("active replay lookahead is never requested by the frontend", () => {
   assert.ok(panel.includes('includeFuture: "false"'));
   assert.ok(types.includes("activeSessionLookaheadBlocked: true"));
