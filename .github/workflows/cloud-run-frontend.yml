@@ -1,0 +1,53 @@
+name: Cloud Run Frontend CI
+
+on:
+  pull_request:
+    paths:
+      - "cloud-run-server.ts"
+      - "Dockerfile"
+      - "package.json"
+      - "package-lock.json"
+      - "api/**"
+      - "src/**"
+      - "deployment/**"
+      - ".github/workflows/cloud-run-frontend.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cloud-run-server.ts"
+      - "Dockerfile"
+      - "package.json"
+      - "package-lock.json"
+      - "api/**"
+      - "src/**"
+      - "deployment/**"
+      - ".github/workflows/cloud-run-frontend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install --package-lock=false --ignore-scripts --no-audit --no-fund
+      - name: TypeScript check
+        run: npm run typecheck
+      - name: Production build
+        run: npm run build
+      - name: Build Cloud Run container
+        run: docker build -t bybit-frontend:ci .
+      - name: Verify canonical deployment files
+        run: |
+          test -f cloud-run-server.ts
+          test -f deployment/ARCHITECTURE.md
+          test ! -f render.yaml
+          test ! -f vercel.json
+          test ! -f render-server.ts

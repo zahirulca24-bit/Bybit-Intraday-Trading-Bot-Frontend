@@ -19,7 +19,7 @@ RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund \
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/api ./api
-COPY --from=build /app/render-server.ts ./render-server.ts
+COPY --from=build /app/cloud-run-server.ts ./cloud-run-server.ts
 
 USER node
 EXPOSE 8080

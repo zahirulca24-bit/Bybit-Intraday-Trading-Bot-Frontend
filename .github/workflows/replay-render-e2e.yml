@@ -1,4 +1,4 @@
-name: Historical Replay Render E2E
+name: Historical Replay Cloud Run E2E
 
 on:
   pull_request:
@@ -9,11 +9,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: replay-render-e2e-${{ github.event.pull_request.number || github.ref }}
+  group: replay-cloud-run-e2e-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  replay-render-e2e:
+  replay-cloud-run-e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -31,15 +31,15 @@ jobs:
       - name: Install Chromium
         run: npx playwright install chromium
 
-      - name: Typecheck, build and run full Render BFF replay E2E
+      - name: Typecheck, build and run full Cloud Run BFF replay E2E
         run: npm run verify
 
-      - name: Verify Render Blueprint contract
+      - name: Verify Cloud Run container contract
         run: |
-          grep -F 'startCommand: npm start' render.yaml
-          grep -F 'healthCheckPath: /healthz' render.yaml
-          grep -F 'BACKEND_ADMIN_TOKEN' render.yaml
-          grep -F 'app.all("/api/replay/*"' render-server.ts
+          grep -F 'CMD ["npm", "start"]' Dockerfile
+          grep -F 'EXPOSE 8080' Dockerfile
+          grep -F 'cloud-run-server.ts' Dockerfile
+          grep -F 'app.all("/api/replay/*"' cloud-run-server.ts
 
       - name: Verify browser bundle cannot contain backend credentials
         run: |

@@ -4,7 +4,7 @@ import fs from "node:fs";
 
 const endpoint = fs.readFileSync("api/execution-truth.ts", "utf8");
 const component = fs.readFileSync("src/components/WorkerPipelineTruth.tsx", "utf8");
-const vercel = fs.readFileSync("vercel.json", "utf8");
+const cloudRunServer = fs.readFileSync("cloud-run-server.ts", "utf8");
 
 const states = ["AVAILABLE", "RESERVED", "ORDER_PENDING", "PARTIALLY_FILLED", "MANAGING", "CLOSING", "CLOSED", "FAILED"];
 const stages = ["Daily Top100", "4H Top50", "1H Top20", "15M Classification", "5M Confirmation", "Risk Verdict", "Sizing Verdict", "PostgreSQL Outbox", "Node Execution", "Trade Management"];
@@ -30,10 +30,9 @@ test("locked policy remains visible and unchanged", () => {
   assert.match(component, /Runner trail: 0\.5R/);
 });
 
-test("Vercel routes the dedicated truth adapter before generic BFF", () => {
-  const config = JSON.parse(vercel);
-  const routeIndex = config.rewrites.findIndex((row: any) => row.source === "/api/execution-truth");
-  const genericIndex = config.rewrites.findIndex((row: any) => row.source === "/api/:path*");
+test("Cloud Run server routes the dedicated truth adapter before generic BFF", () => {
+  const routeIndex = cloudRunServer.indexOf('app.get("/api/execution-truth"');
+  const genericIndex = cloudRunServer.indexOf('app.all("/api/*"');
   assert.ok(routeIndex >= 0);
   assert.ok(genericIndex > routeIndex);
 });

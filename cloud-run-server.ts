@@ -29,7 +29,7 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "256kb" }));
 
 app.get("/healthz", (_req, res) => {
-  res.status(200).json({ ok: true, service: "bybit-frontend-bff", environment: "BYBIT_DEMO" });
+  res.status(200).json({ ok: true, service: "bybit-frontend-bff", platform: "GOOGLE_CLOUD_RUN", environment: "BYBIT_DEMO" });
 });
 
 app.post("/api/auth/login", (req, res) => void loginHandler(req, res));
@@ -86,7 +86,7 @@ app.get("*", (_req, res) => {
 });
 
 const server = app.listen(port, "0.0.0.0", () => {
-  console.log(`Bybit frontend BFF listening on 0.0.0.0:${port}`);
+  console.log(`Bybit frontend Cloud Run BFF listening on 0.0.0.0:${port}`);
 });
 
 function shutdown(signal: string): void {
