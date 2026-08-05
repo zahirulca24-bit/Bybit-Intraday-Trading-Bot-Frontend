@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 
 import { api } from "../services/api";
@@ -6,7 +6,29 @@ import { ReplaySession } from "../types";
 import { HistoricalReplayView } from "./HistoricalReplayView";
 import { ReplayVisualizationPanel } from "./ReplayVisualizationPanel";
 
+function installStableReplaySelectors(root: HTMLElement): void {
+  const elements = Array.from(root.querySelectorAll<HTMLElement>("button, span, div"));
+
+  const safetyBadge = elements.find((element) => element.textContent?.trim() === "EXTERNAL EXECUTION BLOCKED");
+  if (safetyBadge) safetyBadge.dataset.testid = "replay-safety-badge";
+
+  const selectedId = elements.find((element) => /^replay_ui_[A-Za-z0-9_-]+$/.test(element.textContent?.trim() || ""));
+  if (selectedId) selectedId.dataset.testid = "replay-selected-id";
+
+  const journalTab = elements.find((element) => element.tagName === "BUTTON" && element.textContent?.trim() === "Journal");
+  if (journalTab) journalTab.dataset.testid = "replay-journal-tab";
+
+  const journalEntries = elements.filter((element) => {
+    const text = element.textContent?.trim() || "";
+    return element.tagName === "DIV" && /^#\d+\s+[a-z0-9_.-]+/i.test(text);
+  });
+  journalEntries.forEach((entry) => { entry.dataset.testid = "replay-journal-entry"; });
+  const journalList = journalEntries[0]?.parentElement;
+  if (journalList) journalList.dataset.testid = "replay-journal-list";
+}
+
 export const HistoricalReplayPhase2View: React.FC = () => {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [sessions, setSessions] = useState<ReplaySession[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState<number>(0);
@@ -36,10 +58,19 @@ export const HistoricalReplayPhase2View: React.FC = () => {
     return () => window.clearInterval(interval);
   }, [loadSessions]);
 
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    installStableReplaySelectors(root);
+    const observer = new MutationObserver(() => installStableReplaySelectors(root));
+    observer.observe(root, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, []);
+
   const selected = sessions.find((session) => session.sessionId === selectedId) ?? null;
 
   return (
-    <div className="space-y-3" data-testid="historical-replay-phase-2-view">
+    <div ref={rootRef} className="space-y-3" data-testid="historical-replay-phase-2-view">
       <HistoricalReplayView />
       <div className="rounded-xl border border-slate-800 bg-[#0b0f18] p-3">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
