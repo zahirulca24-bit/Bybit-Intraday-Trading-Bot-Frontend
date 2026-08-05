@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { scryptSync } from "node:crypto";
 import test from "node:test";
 
 function freshModule() {
@@ -10,24 +11,31 @@ function responseMock() {
   return { headers, setHeader(name: string, value: string | string[]) { headers.set(name, value); } };
 }
 
+function configure(password = "expected-secret") {
+  const salt = "test-salt";
+  process.env.FRONTEND_OPERATOR_PASSWORD_SCRYPT = `scrypt$${salt}$${scryptSync(password, salt, 32).toString("hex")}`;
+  process.env.FRONTEND_SESSION_SIGNING_SECRET = "independent-session-signing-secret-for-tests";
+}
+
 test("missing server configuration returns 503", async () => {
-  delete process.env.FRONTEND_CONTROL_TOKEN;
+  delete process.env.FRONTEND_OPERATOR_PASSWORD_SCRYPT;
+  delete process.env.FRONTEND_SESSION_SIGNING_SECRET;
   const auth = await freshModule();
-  assert.throws(() => auth.verifyControlToken("x"), (error: any) => error.status === 503);
+  assert.throws(() => auth.verifyControlPassword("x"), (error: any) => error.status === 503);
 });
 
-test("missing token returns 401 and invalid token returns 403", async () => {
-  process.env.FRONTEND_CONTROL_TOKEN = "expected-secret";
+test("missing password returns 401 and invalid password returns 403", async () => {
+  configure();
   const auth = await freshModule();
-  assert.throws(() => auth.verifyControlToken(""), (error: any) => error.status === 401);
-  assert.throws(() => auth.verifyControlToken("wrong-secret"), (error: any) => error.status === 403);
+  assert.throws(() => auth.verifyControlPassword(""), (error: any) => error.status === 401);
+  assert.throws(() => auth.verifyControlPassword("wrong-secret"), (error: any) => error.status === 403);
 });
 
-test("valid token issues a valid HttpOnly session", async () => {
-  process.env.FRONTEND_CONTROL_TOKEN = "expected-secret";
+test("valid password issues a valid HttpOnly session", async () => {
+  configure();
   process.env.NODE_ENV = "test";
   const auth = await freshModule();
-  auth.verifyControlToken("expected-secret");
+  auth.verifyControlPassword("expected-secret");
   const res = responseMock();
   auth.issueControlSession(res);
   const setCookie = String(res.headers.get("Set-Cookie"));
