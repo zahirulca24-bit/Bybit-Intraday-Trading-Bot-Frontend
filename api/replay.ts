@@ -13,6 +13,7 @@ const ALLOWED_GET_PATHS = [
   new RegExp(`^/api/replay/sessions/${SESSION_ID}$`),
   new RegExp(`^/api/replay/sessions/${SESSION_ID}/performance$`),
   new RegExp(`^/api/replay/sessions/${SESSION_ID}/journal$`),
+  new RegExp(`^/api/replay/sessions/${SESSION_ID}/visualization$`),
 ];
 const ALLOWED_POST_PATHS = [
   /^\/api\/replay\/start$/,
