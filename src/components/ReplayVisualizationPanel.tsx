@@ -1,8 +1,26 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CandlestickChart, Loader2, ShieldCheck } from "lucide-react";
 
-import { api } from "../services/api";
-import { ReplayVisualizationResponse, ReplayVisualizationTrade } from "../types";
+import { ReplayVisualizationResponse, ReplayVisualizationTrade } from "../replay-visualization-types";
+
+async function fetchVisualization(sessionId: string): Promise<ReplayVisualizationResponse> {
+  const query = new URLSearchParams({ limit: "500", includeFuture: "false" });
+  const response = await fetch(`/api/replay/sessions/${encodeURIComponent(sessionId)}/visualization?${query.toString()}`, {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    try {
+      const parsed = JSON.parse(text);
+      throw new Error(parsed.error || `Replay visualization failed (${response.status}).`);
+    } catch (error) {
+      if (error instanceof Error && !error.message.startsWith("Unexpected token")) throw error;
+      throw new Error(text || `Replay visualization failed (${response.status}).`);
+    }
+  }
+  return response.json();
+}
 
 function money(value: string | null | undefined): string {
   const numeric = Number(value ?? 0);
@@ -116,7 +134,7 @@ export const ReplayVisualizationPanel: React.FC<{ sessionId: string; refreshKey:
     let active = true;
     setLoading(true);
     setError(null);
-    void api.getReplayVisualization(sessionId, 500)
+    void fetchVisualization(sessionId)
       .then((result) => {
         if (!active) return;
         setData(result);
