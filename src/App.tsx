@@ -76,7 +76,7 @@ export default function App() {
       setStatus(st);
       setAccount(acc);
       setPositions(pos);
-      setLifycles(life);
+      setLifecycles(life);
       setKlines(kl);
       setLogs(lg);
       setIsOffline(false);
