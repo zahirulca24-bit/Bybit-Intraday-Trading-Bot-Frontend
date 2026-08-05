@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - "api/live-journal.ts"
-      - "render-server.ts"
+      - "cloud-run-server.ts"
       - "tests/live-journal-truth.test.ts"
       - "package.json"
       - ".github/workflows/live-journal-truth-ci.yml"
@@ -38,14 +38,14 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Verify Render route precedence
+      - name: Verify Cloud Run route precedence
         run: |
           python - <<'PY'
           from pathlib import Path
-          text = Path("render-server.ts").read_text(encoding="utf-8")
+          text = Path("cloud-run-server.ts").read_text(encoding="utf-8")
           journal = text.index('app.get("/api/logs"')
           fallback = text.index('app.all("/api/*"')
           assert journal < fallback, "/api/logs must be registered before the generic BFF fallback"
           assert 'liveJournalHandler' in text
-          print("Render live journal route precedence verified")
+          print("Cloud Run live journal route precedence verified")
           PY
