@@ -26,12 +26,17 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     return;
   }
   if (!ADMIN_TOKEN) {
-    sendJson(res, 503, { error: "Vercel server is missing BACKEND_ADMIN_TOKEN." });
+    sendJson(res, 503, { error: "Frontend BFF is missing BACKEND_ADMIN_TOKEN." });
     return;
   }
 
-  const parsed = new URL(req.url || "/api/analytics", "https://vercel.local");
-  const endpoint = String(parsed.searchParams.get("path") || "").replace(/^\/+|\/+$/g, "");
+  const parsed = new URL(req.url || "/api/analytics", "https://frontend.local");
+  const routedPath = String(
+    req.query?.path ||
+    parsed.searchParams.get("path") ||
+    parsed.pathname.replace(/^\/api\/analytics\/?/, ""),
+  );
+  const endpoint = routedPath.replace(/^\/+|\/+$/g, "");
   if (!ALLOWED.has(endpoint)) {
     sendJson(res, 404, { error: "Unsupported analytics endpoint" });
     return;
@@ -39,8 +44,11 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
 
   const upstreamSearch = new URLSearchParams();
   for (const key of ["limit", "force"]) {
-    const value = parsed.searchParams.get(key);
-    if (value !== null) upstreamSearch.set(key, value);
+    const queryValue = req.query?.[key];
+    const value = Array.isArray(queryValue)
+      ? queryValue[0]
+      : queryValue ?? parsed.searchParams.get(key);
+    if (value !== null && value !== undefined) upstreamSearch.set(key, String(value));
   }
   const query = upstreamSearch.toString();
   const target = `${BACKEND_URL}/api/analytics/${endpoint}${query ? `?${query}` : ""}`;
@@ -65,7 +73,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
     sendJson(res, timeout ? 504 : 502, {
       error: timeout
-        ? "Analytics backend timed out. Render may be waking up; retry shortly."
+        ? "Analytics backend timed out; retry shortly."
         : String(error?.message || "Unable to reach analytics backend"),
     });
   }
