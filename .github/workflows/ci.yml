@@ -17,8 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false
       - run: npm run typecheck
       - run: npm run test:auth
       - run: npm run test:scanner
@@ -27,7 +26,7 @@ jobs:
       - run: npm run test:ui-verification
       - run: npm run test:cloud-run
       - run: npm run build
-      - run: npm audit --audit-level=high
+      - run: npm audit --audit-level=high --package-lock=false
 
   secret-scan:
     runs-on: ubuntu-latest
