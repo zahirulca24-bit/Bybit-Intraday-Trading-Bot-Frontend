@@ -12,9 +12,6 @@ function installStableReplaySelectors(root: HTMLElement): void {
   const safetyBadge = elements.find((element) => element.textContent?.trim() === "EXTERNAL EXECUTION BLOCKED");
   if (safetyBadge) safetyBadge.dataset.testid = "replay-safety-badge";
 
-  const selectedId = elements.find((element) => /^replay_ui_[A-Za-z0-9_-]+$/.test(element.textContent?.trim() || ""));
-  if (selectedId) selectedId.dataset.testid = "replay-selected-id";
-
   const journalTab = elements.find((element) => element.tagName === "BUTTON" && element.textContent?.trim() === "Journal");
   if (journalTab) journalTab.dataset.testid = "replay-journal-tab";
 
