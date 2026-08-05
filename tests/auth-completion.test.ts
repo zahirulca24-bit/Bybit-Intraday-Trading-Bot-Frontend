@@ -4,37 +4,38 @@ import test from "node:test";
 
 const read = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
-test("production server registers login and logout before the generic BFF fallback", async () => {
-  const source = await read("render-server.ts");
+test("Cloud Run production server registers login and logout before the generic BFF fallback", async () => {
+  const source = await read("cloud-run-server.ts");
   assert.ok(source.includes('app.post("/api/auth/login"'));
   assert.ok(source.includes('app.post("/api/auth/logout"'));
   assert.ok(source.indexOf('app.post("/api/auth/login"') < source.indexOf('app.all("/api/*"'));
 });
 
-test("production generic mutation fallback requires and tags operator sessions", async () => {
-  const source = await read("render-server.ts");
+test("Cloud Run generic mutation fallback requires and tags operator sessions", async () => {
+  const source = await read("cloud-run-server.ts");
   assert.ok(source.includes("requireControlSession(req)"));
   assert.ok(source.includes('!["GET", "HEAD", "OPTIONS"].includes(method)'));
   assert.ok(source.includes('res.setHeader("X-Control-Auth-Error", "session")'));
   assert.ok(source.includes('code: "CONTROL_SESSION_INVALID"'));
 });
 
-test("Vercel exposes canonical auth routes without leaking the Cloud Run upstream into build config", async () => {
-  const config = await read("vercel.json");
-  const middleware = await read("middleware.ts");
+test("Cloud Run keeps backend credentials server-only and exposes canonical auth routes", async () => {
+  const server = await read("cloud-run-server.ts");
+  const dockerfile = await read("Dockerfile");
+  const envExample = await read(".env.example");
   const toggle = await read("api/bot-toggle.ts");
   const scanner = await read("api/scanner-live.ts");
-  assert.ok(config.includes('"api/auth/session.ts"'));
-  assert.ok(config.includes('"source": "/api/auth/session"'));
-  assert.ok(!config.includes('"BACKEND_API_URL"'));
-  assert.ok(!config.includes("bybit-intraday-backend-608992045433.asia-south1.run.app"));
+  assert.ok(server.includes('app.post("/api/auth/login"'));
+  assert.ok(server.includes('app.post("/api/auth/logout"'));
+  assert.ok(server.includes('app.get("/api/auth/session"'));
+  assert.ok(dockerfile.includes("cloud-run-server.ts"));
+  assert.ok(envExample.includes("BACKEND_API_URL="));
+  assert.ok(envExample.includes("BACKEND_ADMIN_TOKEN="));
+  assert.ok(envExample.includes("FRONTEND_OPERATOR_PASSWORD_SCRYPT="));
+  assert.ok(envExample.includes("FRONTEND_SESSION_SIGNING_SECRET="));
+  assert.ok(!envExample.includes("VITE_BACKEND_ADMIN_TOKEN"));
   assert.ok(toggle.includes("bybit-intraday-backend-608992045433.asia-south1.run.app"));
   assert.ok(scanner.includes("bybit-intraday-backend-608992045433.asia-south1.run.app"));
-  assert.ok(middleware.includes('matcher: "/api/:path*"'));
-  assert.ok(middleware.includes('"/api/auth/login"'));
-  assert.ok(middleware.includes('"/api/auth/logout"'));
-  assert.ok(middleware.includes('"/api/bot/toggle"'));
-  assert.ok(middleware.includes("Legacy generic mutation endpoint is disabled"));
 });
 
 test("browser retries only tagged control-session failures", async () => {
