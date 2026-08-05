@@ -25,7 +25,7 @@ import { JournalView } from "./components/JournalView";
 import { RiskAndControlsView } from "./components/RiskAndControlsView";
 import { SettingsAndHealthView } from "./components/SettingsAndHealthView";
 import { StrategyAnalyticsView } from "./components/StrategyAnalyticsView";
-import { HistoricalReplayView } from "./components/HistoricalReplayView";
+import { HistoricalReplayPhase2View } from "./components/HistoricalReplayPhase2View";
 import { OfflineBanner, ServerErrorAlert } from "./components/StateViews";
 
 const POSITION_CONTROL_UNAVAILABLE =
@@ -76,7 +76,7 @@ export default function App() {
       setStatus(st);
       setAccount(acc);
       setPositions(pos);
-      setLifecycles(life);
+      setLifycles(life);
       setKlines(kl);
       setLogs(lg);
       setIsOffline(false);
@@ -240,7 +240,7 @@ export default function App() {
           )}
 
           {activeTab === "strategy-analytics" && <StrategyAnalyticsView />}
-          {activeTab === "historical-replay" && <HistoricalReplayView />}
+          {activeTab === "historical-replay" && <HistoricalReplayPhase2View />}
 
           {activeTab === "risk-controls" && (
             <RiskAndControlsView
