@@ -4,7 +4,7 @@ import fs from "node:fs";
 
 const endpoint = fs.readFileSync("api/execution-truth.ts", "utf8");
 const component = fs.readFileSync("src/components/WorkerPipelineTruth.tsx", "utf8");
-const server = fs.readFileSync("render-server.ts", "utf8");
+const server = fs.readFileSync("cloud-run-server.ts", "utf8");
 
 test("durable execution truth is verified only for healthy restart-safe PostgreSQL", () => {
   assert.ok(endpoint.includes('backend === "POSTGRESQL" && restartSafe && !degraded'));
