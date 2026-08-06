@@ -21,6 +21,10 @@ function numberValue(value: any, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function percentToRatio(value: any): number {
+  return numberValue(value) / 100;
+}
+
 function stringValue(value: any, fallback = ""): string {
   return value === null || value === undefined ? fallback : String(value);
 }
@@ -101,7 +105,7 @@ function mapSignal(row: AnyRecord, entryTimeframe: string): AnyRecord {
     routerReason: stringValue(row?.reason || router?.reason, "No backend reason supplied"),
     change24hPct: numberValue(row?.changePct),
     turnoverUsdt: numberValue(row?.turnover24h),
-    spreadPct: numberValue(row?.spreadPct),
+    spreadPct: percentToRatio(row?.spreadPct),
     atr15m: numberValue(row?.atr15mPct),
     volumeRatio: numberValue(row?.volumeRatio),
     costTier: costTier(row?.costTier),
@@ -163,6 +167,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const policy = universe?.policy || raw?.policy || {};
     const entryTimeframe = `${stringValue(raw?.interval, requestedInterval).replace(/m$/i, "")}m`;
     const updatedAt = numberValue(universe?.updatedAt, 0);
+    const rejectedCount = numberValue(scanMeta?.rejected) + numberValue(metrics?.agreementRequiredExcluded);
 
     sendJson(res, 200, {
       summary: {
@@ -174,7 +179,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
         shortlisted: numberValue(metrics?.shortlisted, scanMeta?.shortlistSize || rows.length),
         deepScanned: numberValue(metrics?.deepScan, scanMeta?.deepScanSize || rows.length),
         completed: numberValue(scanMeta?.completed, rows.length),
-        rejected: numberValue(scanMeta?.rejected),
+        rejected: rejectedCount,
         timedOut: scanMeta?.timedOut ? 1 : 0,
         scanDurationMs: Date.now() - started,
         lastUpdated: updatedAt > 0
@@ -188,9 +193,9 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       policy: {
         shortlistSize: numberValue(policy?.shortlistSize, scanMeta?.shortlistSize),
         deepScanSize: numberValue(policy?.deepScanSize, scanMeta?.deepScanSize),
-        normalSpreadThresholdPct: numberValue(policy?.normalSpreadPct),
-        reducedSizeSpreadThresholdPct: numberValue(policy?.reducedSpreadPct),
-        maxSpreadThresholdPct: numberValue(policy?.maxSpreadPct),
+        normalSpreadThresholdPct: percentToRatio(policy?.normalSpreadPct),
+        reducedSizeSpreadThresholdPct: percentToRatio(policy?.reducedSpreadPct),
+        maxSpreadThresholdPct: percentToRatio(policy?.maxSpreadPct),
         minTurnoverUsdt: numberValue(policy?.minimumTurnover),
         minAtr15m: numberValue(policy?.minimumAtrPct),
         maxAtr15m: numberValue(policy?.maximumAtrPct),
