@@ -11,13 +11,26 @@ test("scanner reads the canonical Cloud Run scanner endpoint", async () => {
   assert.ok(source.includes("Authorization: `Bearer ${ADMIN_TOKEN}`"));
 });
 
+test("scanner normalizes backend percentage points to frontend ratios", async () => {
+  const source = await read("api/scanner-live.ts");
+  assert.ok(source.includes("function percentToRatio(value: any): number"));
+  assert.ok(source.includes("spreadPct: percentToRatio(row?.spreadPct)"));
+  assert.ok(source.includes("maxSpreadThresholdPct: percentToRatio(policy?.maxSpreadPct)"));
+});
+
 test("scanner renders policy values returned by the backend", async () => {
   const source = await read("api/scanner-live.ts");
   assert.ok(source.includes("const policy = universe?.policy || raw?.policy || {}"));
-  assert.ok(source.includes("normalSpreadThresholdPct: numberValue(policy?.normalSpreadPct)"));
+  assert.ok(source.includes("normalSpreadThresholdPct: percentToRatio(policy?.normalSpreadPct)"));
   assert.ok(source.includes("minTurnoverUsdt: numberValue(policy?.minimumTurnover)"));
   assert.ok(source.includes("minGrossRR: numberValue(policy?.minimumGrossRr)"));
   assert.ok(source.includes("maxCostToRiskLimitPct: numberValue(policy?.maximumCostRiskPct)"));
+});
+
+test("scanner counts agreement-filtered candidates as rejected", async () => {
+  const source = await read("api/scanner-live.ts");
+  assert.ok(source.includes("numberValue(metrics?.agreementRequiredExcluded)"));
+  assert.ok(source.includes("rejected: rejectedCount"));
 });
 
 test("frontend does not apply a second scanner threshold policy", async () => {
