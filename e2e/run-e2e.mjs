@@ -76,7 +76,7 @@ const backend = createServer(async (req, res) => {
     return json(res, 200, { equity: 1000, availableBalance: 1000 });
   }
 
-  if (method === "GET" && ["/api/positions", "/api/bybit/positions"].includes(url.pathname)) {
+  if (method === "GET" && (url.pathname === "/api/positions" || url.pathname === "/api/bybit/positions")) {
     return json(res, 200, { positions: [] });
   }
 
@@ -84,8 +84,8 @@ const backend = createServer(async (req, res) => {
     return json(res, 200, { orders: [] });
   }
 
-  if (method === "GET" && url.pathname === "/api/market/klines") {
-    return json(res, 200, { candles: [] });
+  if (method === "GET" && (url.pathname === "/api/market/klines" || url.pathname === "/api/bybit/kline")) {
+    return json(res, 200, { candles: [], result: { list: [] } });
   }
 
   if (method === "GET" && url.pathname === "/api/logs") {
@@ -262,7 +262,7 @@ try {
     if (message.type() === "error") console.error(`browser console: ${message.text()}`);
   });
 
-  await page.goto(frontendBase, { waitUntil: "networkidle" });
+  await page.goto(frontendBase, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.locator("#root").waitFor({ state: "attached", timeout: 15_000 });
   const replayNav = page.locator("#desktop-sidebar #nav-item-historical-replay");
   await replayNav.waitFor({ state: "attached", timeout: 15_000 });
