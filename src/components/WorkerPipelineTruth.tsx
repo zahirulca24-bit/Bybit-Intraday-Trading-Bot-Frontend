@@ -127,21 +127,31 @@ export const WorkerPipelineTruth: React.FC = () => {
         </div>
         {error && <div className="mb-3 rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">Latest refresh failed: {error}. Previous data is not treated as current.</div>}
         {loading && !truth && <div className="text-xs text-slate-400 mb-3">Loading canonical execution truth…</div>}
-        <div className="overflow-x-auto pb-2">
-          <div className="flex min-w-[1060px] items-stretch gap-2">
-            {(truth?.stages || []).map((stage, index, all) => (
-              <React.Fragment key={stage.name}>
-                <div className={`w-[118px] shrink-0 rounded-lg border p-2 ${stale ? styleFor("ERROR") : styleFor(stage.state)}`} title={stage.detail}>
-                  <div className="flex items-center gap-1.5">{iconFor(stale ? "ERROR" : stage.state)}<span className="text-[10px] font-bold">{stale ? "STALE" : stage.state.replace("_", " ")}</span></div>
-                  <div className="mt-2 text-xs font-semibold text-slate-100 leading-tight">{stage.name}</div>
-                  <div className="mt-1 text-[10px] leading-tight opacity-80">{stage.count !== null ? `${stage.count} · ` : ""}{stage.detail}</div>
-                </div>
-                {index < all.length - 1 && <div className="flex items-center text-slate-600 font-bold">→</div>}
-              </React.Fragment>
-            ))}
+
+        <div className="flex flex-col 2xl:flex-row gap-3 items-stretch">
+          <div className="min-w-0 flex-1 overflow-x-auto pb-2">
+            <div className="flex min-w-[1060px] items-stretch gap-2">
+              {(truth?.stages || []).map((stage, index, all) => (
+                <React.Fragment key={stage.name}>
+                  <div className={`w-[118px] shrink-0 rounded-lg border p-2 ${stale ? styleFor("ERROR") : styleFor(stage.state)}`} title={stage.detail}>
+                    <div className="flex items-center gap-1.5">{iconFor(stale ? "ERROR" : stage.state)}<span className="text-[10px] font-bold">{stale ? "STALE" : stage.state.replace("_", " ")}</span></div>
+                    <div className="mt-2 text-xs font-semibold text-slate-100 leading-tight">{stage.name}</div>
+                    <div className="mt-1 text-[10px] leading-tight opacity-80">{stage.count !== null ? `${stage.count} · ` : ""}{stage.detail}</div>
+                  </div>
+                  {index < all.length - 1 && <div className="flex items-center text-slate-600 font-bold">→</div>}
+                </React.Fragment>
+              ))}
+            </div>
           </div>
+
+          {blocker && (
+            <div className={`2xl:w-[360px] 2xl:shrink-0 rounded-lg border p-3 self-stretch ${styleFor(stale ? "ERROR" : blocker.state)}`}>
+              <div className="text-[10px] uppercase tracking-wider font-bold">Current pipeline point</div>
+              <div className="mt-1 text-sm font-bold">{stale ? "Execution truth refresh required" : `${blocker.name}: ${blocker.state.replace("_", " ")}`}</div>
+              <div className="mt-1 text-xs leading-relaxed">{stale ? "The UI will not present stale execution evidence as current truth." : blocker.detail}</div>
+            </div>
+          )}
         </div>
-        {blocker && <div className={`mt-3 rounded-lg border p-3 ${styleFor(stale ? "ERROR" : blocker.state)}`}><div className="text-[10px] uppercase tracking-wider font-bold">Current pipeline point</div><div className="mt-1 text-sm font-bold">{stale ? "Execution truth refresh required" : `${blocker.name}: ${blocker.state.replace("_", " ")}`}</div><div className="mt-1 text-xs">{stale ? "The UI will not present stale execution evidence as current truth." : blocker.detail}</div></div>}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">

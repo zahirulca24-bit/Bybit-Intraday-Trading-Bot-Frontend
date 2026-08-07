@@ -229,10 +229,7 @@ export default function App() {
           )}
 
           {activeTab === "active-trades" && (
-            <div className="space-y-4">
-              <WorkerPipelineTruth />
-              <ActiveTradesView positions={positions} lifecycles={lifecycles} status={status} isLoading={loading} isError={isOffline} errorMessage={serverError || undefined} onRefresh={loadDashboardData} onClosePosition={handleClosePosition} onUpdateSLTP={handleUpdateSLTP} />
-            </div>
+            <ActiveTradesView positions={positions} lifecycles={lifecycles} status={status} isLoading={loading} isError={isOffline} errorMessage={serverError || undefined} onRefresh={loadDashboardData} onClosePosition={handleClosePosition} onUpdateSLTP={handleUpdateSLTP} />
           )}
 
           {activeTab === "journal" && (
