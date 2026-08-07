@@ -73,6 +73,24 @@ function hasCompleteExecutionEvidence(entry: AnyRecord): boolean {
   );
 }
 
+function explicitLifecycleProblemOrWait(entry: AnyRecord): boolean {
+  const event = text(entry?.event).toLowerCase();
+  const payload = entry?.payload || {};
+  const result = payload?.result || {};
+  const reason = text(result?.retMsg || payload?.reason || payload?.message).toLowerCase();
+  return Boolean(
+    event.includes("error") || reason.includes("error") || reason.includes("failed") ||
+    event.includes("blocked") || event.includes("cancelled") || reason.includes("blocked") ||
+    event.includes("degraded") || reason.includes("degraded") ||
+    event.includes("pending") || event.includes("wait") || reason.includes("pending") ||
+    (result?.retCode !== undefined && optionalNumber(result.retCode) !== 0)
+  );
+}
+
+function shouldExposeLifecycle(entry: AnyRecord): boolean {
+  return hasCompleteExecutionEvidence(entry) || explicitLifecycleProblemOrWait(entry);
+}
+
 function lifecycleLevel(entry: AnyRecord): LifecycleLevel {
   const event = text(entry?.event).toLowerCase();
   const payload = entry?.payload || {};
@@ -139,7 +157,12 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
   try {
     const raw = await backendJson("/api/bot/journal?limit=50");
     const entries = Array.isArray(raw?.journal) ? raw.journal : [];
-    const lifecycles = entries.slice().reverse().map(adaptLifecycle).filter((row: AnyRecord) => row.id && row.symbol);
+    const lifecycles = entries
+      .slice()
+      .reverse()
+      .filter(shouldExposeLifecycle)
+      .map(adaptLifecycle)
+      .filter((row: AnyRecord) => row.id && row.symbol);
     sendJson(res, 200, lifecycles);
   } catch (error: any) {
     sendJson(res, 502, { error: text(error?.message, "Unable to load verified lifecycle truth") });
