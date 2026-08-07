@@ -114,12 +114,56 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const oneHour = rowsFrom(runtime?.hourlyWatchlist?.rows, symbols?.oneHourTop20, symbols?.top20, symbols?.activeSymbols, symbols?.rows);
     const classified = rowsFrom(runtime?.fifteenMinuteStrategyClassification?.rows, setups?.classified15m, setups?.classifications, setups?.rows);
     const confirmed = rowsFrom(runtime?.fiveMinuteEntryConfirmation?.rows, setups?.confirmed5m, setups?.confirmed, setups?.pendingHandoff, setups?.queue);
-    const riskRows = rowsFrom(runtime?.authoritativeEntryRisk?.rows, execution?.riskRows, execution?.risk?.rows, execution?.riskApproved);
-    const sizingRows = rowsFrom(runtime?.positionSizingMargin?.rows, execution?.sizingRows, execution?.sizing?.rows, execution?.approvedSizingQueue);
-    const outboxRows = rowsFrom(runtime?.executionCommandOutbox?.rows, execution?.executionCommands, execution?.commands, execution?.outbox?.rows, execution?.rows);
+
+    const riskSnapshot = runtime?.authoritativeEntryRisk || execution?.risk || {};
+    const riskRows = rowsFrom(riskSnapshot?.rows, execution?.riskRows, execution?.risk?.rows, execution?.riskApproved);
+    const riskApproved = rowsFrom(riskSnapshot?.approvedRiskQueue, execution?.approvedRiskQueue, execution?.riskApprovedQueue);
+
+    const sizingSnapshot = runtime?.positionSizingMargin || execution?.sizing || {};
+    const sizingRows = rowsFrom(sizingSnapshot?.rows, execution?.sizingRows, execution?.sizing?.rows);
+    const sizingApproved = rowsFrom(sizingSnapshot?.approvedSizingQueue, execution?.approvedSizingQueue);
+    const sizingStatus = text(sizingSnapshot?.status, "").toLowerCase();
+
+    const outboxSnapshot = runtime?.executionCommandOutbox || execution?.outbox || {};
+    const outboxRows = rowsFrom(outboxSnapshot?.rows, execution?.executionCommands, execution?.commands, execution?.outbox?.rows, execution?.rows);
     const commands = outboxRows.map(normalizeCommand);
     const activeCommands = commands.filter((row) => !["CLOSED", "FAILED"].includes(row.state));
     const durable = normalizeDurable(status, execution, durableStatus);
+
+    const riskDetail = riskRows.length
+      ? `${riskRows.length} risk result(s); ${riskApproved.length} approved for sizing`
+      : "Risk engine not reached";
+
+    let sizingState = "NOT_REACHED";
+    let sizingDetail = "Sizing engine not reached";
+    if (sizingRows.length) {
+      sizingState = sizingApproved.length ? "PASS" : "WAIT";
+      sizingDetail = `${sizingRows.length} sizing result(s); ${sizingApproved.length} approved for outbox`;
+    } else if (riskRows.length && riskApproved.length === 0) {
+      sizingState = "WAIT";
+      sizingDetail = "No risk-approved candidate; sizing correctly idle";
+    } else if (riskApproved.length > 0 && ["error", "stale"].includes(sizingStatus)) {
+      sizingState = "BLOCKED";
+      sizingDetail = text(sizingSnapshot?.lastError, "Sizing snapshot is unavailable");
+    } else if (riskApproved.length > 0) {
+      sizingState = "RUNNING";
+      sizingDetail = `${riskApproved.length} risk-approved candidate(s) awaiting sizing`;
+    }
+
+    let outboxState = "NOT_REACHED";
+    let outboxDetail = "No sizing-approved candidate for execution command";
+    if (commands.length) {
+      outboxState = commands.length && durable.verified ? "PASS" : "BLOCKED";
+      outboxDetail = durable.verified
+        ? `${commands.length} durable command(s)`
+        : "Commands exist but PostgreSQL durability is unverified";
+    } else if (sizingApproved.length > 0) {
+      outboxState = "RUNNING";
+      outboxDetail = `${sizingApproved.length} sizing-approved candidate(s) awaiting durable command publish`;
+    } else if (sizingRows.length) {
+      outboxState = "WAIT";
+      outboxDetail = "Sizing completed with no approved execution candidate";
+    }
 
     const stages = [
       stage("Daily Top100", daily.length ? "PASS" : "WAIT", daily.length || null, daily.length ? `${daily.length} symbols selected` : "Waiting for daily universe snapshot"),
@@ -127,9 +171,9 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       stage("1H Top20", oneHour.length ? "PASS" : fourHour.length ? "RUNNING" : "NOT_REACHED", oneHour.length || null, oneHour.length ? `${oneHour.length} watchlist symbols` : "Waiting for 1H watchlist"),
       stage("15M Classification", classified.length ? "PASS" : oneHour.length ? "RUNNING" : "NOT_REACHED", classified.length || null, classified.length ? `${classified.length} classified setup(s)` : "Waiting for closed 15M classification"),
       stage("5M Confirmation", confirmed.length ? "PASS" : classified.length ? "WAIT" : "NOT_REACHED", confirmed.length || null, confirmed.length ? `${confirmed.length} confirmed candidate(s)` : "Waiting for closed 5M confirmation"),
-      stage("Risk Verdict", riskRows.length ? "PASS" : confirmed.length ? "RUNNING" : "NOT_REACHED", riskRows.length || null, riskRows.length ? `${riskRows.length} risk result(s)` : "Risk engine not reached"),
-      stage("Sizing Verdict", sizingRows.length ? "PASS" : riskRows.length ? "RUNNING" : "NOT_REACHED", sizingRows.length || null, sizingRows.length ? `${sizingRows.length} sizing result(s)` : "Sizing engine not reached"),
-      stage("PostgreSQL Outbox", commands.length && durable.verified ? "PASS" : commands.length ? "BLOCKED" : sizingRows.length ? "RUNNING" : "NOT_REACHED", commands.length || null, commands.length ? (durable.verified ? `${commands.length} durable command(s)` : "Commands exist but PostgreSQL durability is unverified") : "No execution command published"),
+      stage("Risk Verdict", riskRows.length ? "PASS" : confirmed.length ? "RUNNING" : "NOT_REACHED", riskRows.length || null, riskDetail),
+      stage("Sizing Verdict", sizingState, sizingRows.length || null, sizingDetail),
+      stage("PostgreSQL Outbox", outboxState, commands.length || null, outboxDetail),
       stage("Node Execution", commands.some((row) => ["ORDER_PENDING", "PARTIALLY_FILLED", "MANAGING", "CLOSING", "CLOSED"].includes(row.state)) ? "PASS" : activeCommands.length ? "RUNNING" : "NOT_REACHED", activeCommands.length || null, activeCommands.length ? `${activeCommands.length} active Node command(s)` : "No active Node command"),
       stage("Trade Management", commands.some((row) => ["MANAGING", "CLOSING", "CLOSED"].includes(row.state)) ? "PASS" : commands.some((row) => row.state === "PARTIALLY_FILLED") ? "RUNNING" : "NOT_REACHED", null, "TP1 40% at 1.5R → break-even → TP2 30% at 2R → 30% runner with 0.5R trail"),
     ];

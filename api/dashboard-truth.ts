@@ -61,6 +61,15 @@ function timestampIso(value: any): string {
   return new Date(millis).toISOString();
 }
 
+function availableBalanceFromWallet(account: AnyRecord, equity: number): number {
+  const reported = optionalNumber(account?.totalAvailableBalance, account?.totalAvailableBalanceByCoin);
+  if (reported !== null && reported > 0) return reported;
+
+  const initialMargin = Math.max(0, num(account?.totalInitialMargin, 0));
+  const conservative = Math.max(0, equity - initialMargin);
+  return conservative > 0 ? conservative : Math.max(0, reported ?? 0);
+}
+
 async function backendJson(path: string): Promise<any> {
   if (!ADMIN_TOKEN) throw new Error("BACKEND_ADMIN_TOKEN is not configured");
   const response = await fetch(`${BACKEND_URL}${path}`, {
@@ -183,6 +192,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       const bot = status?.bot || status || {};
       const daily = first(bot?.dailyNetLoss, bot?.dailyRisk, status?.dailyNetLoss, status?.dailyRisk, policy?.dailyNetLoss) || {};
       const equity = num(first(account?.totalEquity, account?.totalWalletBalance), 0);
+      const availableBalance = availableBalanceFromWallet(account, equity);
       const floatingPnL = num(first(account?.totalPerpUPL, account?.totalUnrealisedPnl), 0);
       const startingEquity = num(first(daily?.startingEquity, daily?.startOfDayEquity, daily?.equityBaseline, equity), equity);
       const realizedNetPnl = num(first(daily?.realizedNetPnl, daily?.netRealizedPnl, daily?.netPnl, bot?.dailyNetPnl), 0);
@@ -196,7 +206,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
 
       sendJson(res, 200, {
         equity,
-        availableBalance: num(first(account?.totalAvailableBalance, account?.totalAvailableBalanceByCoin), 0),
+        availableBalance,
         floatingPnL,
         floatingPnLPercent: equity ? (floatingPnL / equity) * 100 : 0,
         openTradesCount: openPositions.length,
