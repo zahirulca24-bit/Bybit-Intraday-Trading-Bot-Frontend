@@ -75,7 +75,7 @@ function normalizeCommand(row: AnyRecord, index: number): AnyRecord {
     slotId: numberValue(row?.slotId ?? row?.slot_id ?? runtime?.slotId, 0) || null,
     ownerId: text(row?.ownerId || row?.owner_id || runtime?.ownerId, "") || null,
     grade: text(payload?.grade || payload?.qualityGrade, "") || null,
-    riskPct: numberValue(payload?.riskPct ?? payload?.riskPercent, 0) || null,
+    riskPct: numberValue(payload?.effectiveRiskPerTradePct ?? payload?.gradeRiskPct ?? payload?.riskPct ?? payload?.riskPercent, 0) || null,
     marginMode: text(payload?.marginMode || payload?.nodeExecutionRequirements?.marginMode, "") || null,
     leverage: numberValue(payload?.leverage ?? payload?.nodeExecutionRequirements?.leverage, 0) || null,
     entryReference: numberValue(payload?.entryReference, 0) || null,
@@ -136,7 +136,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     let sizingDetail = "Sizing engine not reached";
     if (sizingRows.length) {
       sizingState = sizingApproved.length ? "PASS" : "WAIT";
-      sizingDetail = `${sizingRows.length} sizing result(s); ${sizingApproved.length} approved for outbox`;
+      sizingDetail = `${sizingRows.length} sizing result(s); ${sizingApproved.length} approved for execution`;
     } else if (riskRows.length && riskApproved.length === 0) {
       sizingState = "WAIT";
       sizingDetail = "No risk-approved candidate; sizing correctly idle";
@@ -149,15 +149,15 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     }
 
     let outboxState = "NOT_REACHED";
-    let outboxDetail = "No sizing-approved candidate for execution command";
+    let outboxDetail = "No sizing-approved candidate for execution support";
     if (commands.length) {
-      outboxState = commands.length && durable.verified ? "PASS" : "BLOCKED";
+      outboxState = durable.verified ? "PASS" : "WAIT";
       outboxDetail = durable.verified
-        ? `${commands.length} durable command(s)`
-        : "Commands exist but PostgreSQL durability is unverified";
+        ? `${commands.length} durable execution command(s)`
+        : `${commands.length} command(s); persistence degraded/unverified — retry/reconciliation required, not a strategy/risk rejection`;
     } else if (sizingApproved.length > 0) {
       outboxState = "RUNNING";
-      outboxDetail = `${sizingApproved.length} sizing-approved candidate(s) awaiting durable command publish`;
+      outboxDetail = `${sizingApproved.length} sizing-approved candidate(s) awaiting execution command handoff`;
     } else if (sizingRows.length) {
       outboxState = "WAIT";
       outboxDetail = "Sizing completed with no approved execution candidate";
@@ -171,7 +171,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       stage("Sizing Verdict", sizingState, sizingRows.length || null, sizingDetail),
       stage("PostgreSQL Outbox", outboxState, commands.length || null, outboxDetail),
       stage("Node Execution", commands.some((row) => ["ORDER_PENDING", "PARTIALLY_FILLED", "MANAGING", "CLOSING", "CLOSED"].includes(row.state)) ? "PASS" : activeCommands.length ? "RUNNING" : "NOT_REACHED", activeCommands.length || null, activeCommands.length ? `${activeCommands.length} active Node command(s)` : "No active Node command"),
-      stage("Trade Management", commands.some((row) => ["MANAGING", "CLOSING", "CLOSED"].includes(row.state)) ? "PASS" : commands.some((row) => row.state === "PARTIALLY_FILLED") ? "RUNNING" : "NOT_REACHED", null, "TP1 40% at 1.5R → break-even → TP2 30% at 2R → 30% runner with 0.5R trail"),
+      stage("Trade Management", commands.some((row) => ["MANAGING", "CLOSING", "CLOSED"].includes(row.state)) ? "PASS" : commands.some((row) => row.state === "PARTIALLY_FILLED") ? "RUNNING" : "NOT_REACHED", null, "Worker owns full trade lifecycle: entry → fill → protection → active management → close → reconciliation"),
     ];
 
     sendJson(res, 200, {
@@ -186,12 +186,18 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       slots: [1, 2, 3].map((slotId) => ({ slotId, command: activeCommands.find((row) => row.slotId === slotId) || null })),
       policy: {
         marginMode: "ISOLATED",
-        leverage: 5,
-        gradeRisk: { "A+": 1, "A": 0.75, "B+": "REJECT" },
+        maximumLeverage: 10,
+        leverage: 10,
+        gradeRisk: { "A+": 1, "A": 1, "B+": "REJECT" },
         maxOpenPositions: 3,
-        perTradeMarginCapPct: 25,
-        combinedMarginCapPct: 60,
-        freeReservePct: 40,
+        fixedPerTradeMarginCapEnabled: false,
+        fixedCombinedMarginCapEnabled: false,
+        fixedFreeReserveEnabled: false,
+        perTradeMarginCapPct: null,
+        combinedMarginCapPct: null,
+        freeReservePct: null,
+        sizingMethod: "APPROVED_RISK_AND_STRUCTURAL_STOP_WITH_REAL_AVAILABLE_MARGIN",
+        outboxAndJournalAreSupportInfrastructure: true,
         tp1: { r: 1.5, closePct: 40, next: "BREAK_EVEN" },
         tp2: { r: 2, closePct: 30 },
         runner: { remainingPct: 30, trailingR: 0.5 },
