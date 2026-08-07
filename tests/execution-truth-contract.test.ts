@@ -7,7 +7,7 @@ const component = fs.readFileSync("src/components/WorkerPipelineTruth.tsx", "utf
 const cloudRunServer = fs.readFileSync("cloud-run-server.ts", "utf8");
 
 const states = ["AVAILABLE", "RESERVED", "ORDER_PENDING", "PARTIALLY_FILLED", "MANAGING", "CLOSING", "CLOSED", "FAILED"];
-const stages = ["Daily Top100", "4H Top50", "1H Top20", "15M Classification", "5M Confirmation", "Risk Verdict", "Sizing Verdict", "PostgreSQL Outbox", "Node Execution", "Trade Management"];
+const stages = ["1H Top20", "15M Classification", "5M Confirmation", "Risk Verdict", "Sizing Verdict", "PostgreSQL Outbox", "Node Execution", "Trade Management"];
 
 test("execution truth uses canonical Cloud Run backend and existing worker endpoints", () => {
   assert.match(endpoint, /bybit-intraday-backend-608992045433\.asia-south1\.run\.app/);
@@ -16,9 +16,11 @@ test("execution truth uses canonical Cloud Run backend and existing worker endpo
   }
 });
 
-test("all authoritative Node states and pipeline stages are represented", () => {
+test("all authoritative Node states and 1H-first pipeline stages are represented", () => {
   for (const state of states) assert.ok(endpoint.includes(state), state);
   for (const stage of stages) assert.ok(endpoint.includes(stage), stage);
+  assert.ok(!endpoint.includes('stage("Daily Top100"'), "Daily Top100 must not be an execution-truth stage");
+  assert.ok(!endpoint.includes('stage("4H Top50"'), "4H Top50 must not be an execution-truth stage");
 });
 
 test("execution pipeline distinguishes evaluated risk from approved sizing input", () => {
