@@ -153,7 +153,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     let outboxState = "NOT_REACHED";
     let outboxDetail = "No sizing-approved candidate for execution command";
     if (commands.length) {
-      outboxState = durable.verified ? "PASS" : "BLOCKED";
+      outboxState = commands.length && durable.verified ? "PASS" : "BLOCKED";
       outboxDetail = durable.verified
         ? `${commands.length} durable command(s)`
         : "Commands exist but PostgreSQL durability is unverified";
