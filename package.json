@@ -16,7 +16,8 @@
     "test:execution-truth": "node --import tsx --test tests/execution-truth-contract.test.ts",
     "test:ui-verification": "node --import tsx --test tests/ui-verification-f3.test.ts",
     "test:cloud-run": "node --import tsx --test tests/cloud-run-contract.test.ts",
-    "test:e2e": "node e2e/run-e2e-wrapper.mjs",
+    "test:e2e": "node e2e/run-e2e-wrapper.mjs && npm run test:e2e:playwright",
+    "test:e2e:playwright": "playwright test",
     "verify": "npm run typecheck && npm run test:auth && npm run test:scanner && npm run test:lifecycle && npm run test:execution-truth && npm run test:ui-verification && npm run test:cloud-run && npm run build && npm run test:e2e"
   },
   "dependencies": {
