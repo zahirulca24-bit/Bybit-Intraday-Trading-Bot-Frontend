@@ -21,6 +21,13 @@ test("all authoritative Node states and pipeline stages are represented", () => 
   for (const stage of stages) assert.ok(endpoint.includes(stage), stage);
 });
 
+test("execution pipeline distinguishes evaluated risk from approved sizing input", () => {
+  assert.ok(endpoint.includes("approvedRiskQueue"));
+  assert.ok(endpoint.includes("approvedSizingQueue"));
+  assert.ok(endpoint.includes("No risk-approved candidate; sizing correctly idle"));
+  assert.ok(endpoint.includes("Sizing completed with no approved execution candidate"));
+});
+
 test("locked policy remains visible and unchanged", () => {
   for (const token of ["ISOLATED", "leverage: 5", '"A+": 1', '"A": 0.75', '"B+": "REJECT"', "maxOpenPositions: 3", "perTradeMarginCapPct: 25", "combinedMarginCapPct: 60", "freeReservePct: 40"]) {
     assert.ok(endpoint.includes(token), token);
