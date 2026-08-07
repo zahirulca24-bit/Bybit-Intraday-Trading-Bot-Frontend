@@ -76,7 +76,7 @@ const backend = createServer(async (req, res) => {
     return json(res, 200, { equity: 1000, availableBalance: 1000 });
   }
 
-  if (method === "GET" && url.pathname === "/api/positions") {
+  if (method === "GET" && ["/api/positions", "/api/bybit/positions"].includes(url.pathname)) {
     return json(res, 200, { positions: [] });
   }
 
@@ -224,6 +224,7 @@ async function waitFor(url, timeoutMs = 30_000) {
 
 let frontend;
 let browser;
+let frontendLogs = "";
 try {
   backend.listen(backendPort, "127.0.0.1");
   await once(backend, "listening");
@@ -240,7 +241,6 @@ try {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let frontendLogs = "";
   frontend.stdout.on("data", (chunk) => { frontendLogs += chunk.toString(); });
   frontend.stderr.on("data", (chunk) => { frontendLogs += chunk.toString(); });
 
