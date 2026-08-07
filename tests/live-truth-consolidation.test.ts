@@ -16,10 +16,8 @@ test("settings status is sourced from canonical durable and worker endpoints", (
   assert.ok(statusTruth.includes("restartSafe"));
 });
 
-test("staged execution truth reads orchestrator snapshots before legacy worker fallbacks", () => {
+test("staged execution truth reads canonical 1H 15M 5M snapshots", () => {
   for (const path of [
-    "runtime?.dailyUniverse?.rows",
-    "runtime?.fourHourDirectionalPool?.rows",
     "runtime?.hourlyWatchlist?.rows",
     "runtime?.fifteenMinuteStrategyClassification?.rows",
     "runtime?.fiveMinuteEntryConfirmation?.rows",
@@ -29,11 +27,14 @@ test("staged execution truth reads orchestrator snapshots before legacy worker f
   ]) {
     assert.ok(executionTruth.includes(path), path);
   }
+  assert.ok(!executionTruth.includes("runtime?.dailyUniverse?.rows"));
+  assert.ok(!executionTruth.includes("runtime?.fourHourDirectionalPool?.rows"));
 });
 
-test("lifecycle PASS requires complete Isolated 5x order evidence", () => {
-  assert.ok(lifecycleTruth.includes("hasVerifiedPassEvidence"));
-  assert.ok(lifecycleTruth.includes("evidence.leverage === 5"));
+test("lifecycle PASS accepts complete isolated execution evidence up to 10x", () => {
+  assert.ok(lifecycleTruth.includes("hasCompleteExecutionEvidence"));
+  assert.ok(lifecycleTruth.includes("evidence.leverage > 0"));
+  assert.ok(lifecycleTruth.includes("evidence.leverage <= 10"));
   for (const token of ["evidence.orderId", "evidence.price > 0", "evidence.sizeUsdt > 0", "evidence.stopLoss > 0", "evidence.takeProfit > 0"]) {
     assert.ok(lifecycleTruth.includes(token), token);
   }
