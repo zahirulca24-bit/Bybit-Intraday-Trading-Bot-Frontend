@@ -99,6 +99,14 @@ export const WorkerPipelineTruth: React.FC = () => {
 
   const durable = truth?.durable;
   const durableVerified = Boolean(durable?.verified) && !stale;
+  const policy = truth?.policy || {};
+  const maxLeverage = Number(policy.maximumLeverage ?? policy.leverage ?? 10);
+  const aPlusRisk = Number(policy.gradeRisk?.["A+"] ?? 1);
+  const aRisk = Number(policy.gradeRisk?.A ?? 1);
+  const bPlus = String(policy.gradeRisk?.["B+"] ?? "REJECT");
+  const fixedMarginCapsDisabled = policy.fixedPerTradeMarginCapEnabled === false
+    && policy.fixedCombinedMarginCapEnabled === false
+    && policy.fixedFreeReserveEnabled === false;
 
   return (
     <section className="space-y-3" id="worker-pipeline-truth">
@@ -152,15 +160,16 @@ export const WorkerPipelineTruth: React.FC = () => {
         <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3"><Database className="w-4 h-4 text-emerald-400"/><h3 className="text-sm font-bold">Locked Execution Policy</h3></div>
           <div className="space-y-2 text-[11px] text-slate-400">
-            <div className="flex justify-between"><span>Margin / leverage</span><strong className="text-slate-100">ISOLATED 5x</strong></div>
-            <div className="flex justify-between"><span>A+ / A / B+</span><strong className="text-slate-100">1% / 0.75% / Reject</strong></div>
-            <div className="flex justify-between"><span>Max open slots</span><strong className="text-slate-100">3</strong></div>
-            <div className="flex justify-between"><span>Margin caps</span><strong className="text-slate-100">25% / 60%</strong></div>
-            <div className="flex justify-between"><span>Free reserve</span><strong className="text-slate-100">40%</strong></div>
+            <div className="flex justify-between"><span>Margin / leverage</span><strong className="text-slate-100">ISOLATED · MAX {maxLeverage}x</strong></div>
+            <div className="flex justify-between"><span>A+ / A / B+</span><strong className="text-slate-100">{aPlusRisk}% / {aRisk}% / {bPlus}</strong></div>
+            <div className="flex justify-between"><span>Max open slots</span><strong className="text-slate-100">{policy.maxOpenPositions ?? 3}</strong></div>
+            <div className="flex justify-between"><span>Fixed margin caps</span><strong className={fixedMarginCapsDisabled ? "text-emerald-300" : "text-amber-300"}>{fixedMarginCapsDisabled ? "REMOVED" : "CHECK BACKEND"}</strong></div>
+            <div className="flex justify-between"><span>Sizing basis</span><strong className="text-slate-100 text-right">1% risk + structural SL</strong></div>
             <div className="pt-2 border-t border-slate-800">TP1 40% at 1.5R → break-even</div>
             <div>TP2 30% at 2R → 30% runner</div>
             <div>Runner trail: 0.5R</div>
-            <div className="pt-2 border-t border-slate-800 flex justify-between gap-3"><span>Durable store</span><strong className={durableVerified ? "text-emerald-300" : "text-red-300"}>{durableVerified ? "POSTGRESQL VERIFIED" : "UNVERIFIED / DEGRADED"}</strong></div>
+            <div className="pt-2 border-t border-slate-800 flex justify-between gap-3"><span>Durable store</span><strong className={durableVerified ? "text-emerald-300" : "text-amber-300"}>{durableVerified ? "POSTGRESQL VERIFIED" : "DEGRADED / RETRY"}</strong></div>
+            <div className="text-[10px] leading-relaxed text-slate-500">Outbox/journal remain support infrastructure; persistence degradation is not displayed as a strategy/risk rejection.</div>
             <div className="text-[10px] leading-relaxed text-slate-500">{durable?.reason || "No canonical persistence evidence returned."}</div>
           </div>
         </div>
