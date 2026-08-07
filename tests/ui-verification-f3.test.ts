@@ -10,8 +10,17 @@ test("durable execution truth verifies PostgreSQL health without turning support
   assert.ok(endpoint.includes('backend === "POSTGRESQL" && restartSafe && !degraded'));
   assert.ok(endpoint.includes("verified,"));
   assert.ok(endpoint.includes('outboxState = durable.verified ? "PASS" : "WAIT"'));
-  assert.ok(endpoint.includes("not a strategy/risk rejection"));
+  assert.ok(endpoint.includes("support retry only, trade eligibility unchanged"));
+  assert.ok(endpoint.includes("outboxIsTradeRejectionGate: false"));
   assert.ok(!endpoint.includes('outboxState = commands.length && durable.verified ? "PASS" : "BLOCKED"'));
+  assert.ok(!endpoint.includes('outboxState = "BLOCKED"'));
+});
+
+test("sizing is rendered as calculator-only and cannot become a BLOCKED trade gate", () => {
+  assert.ok(endpoint.includes("Sizing Calculator"));
+  assert.ok(endpoint.includes("sizingIsTradeRejectionGate: false"));
+  assert.ok(endpoint.includes("no trade rejection"));
+  assert.ok(!endpoint.includes('sizingState = "BLOCKED"'));
 });
 
 test("canonical durable state is fetched server-side with the existing authenticated backend client", () => {

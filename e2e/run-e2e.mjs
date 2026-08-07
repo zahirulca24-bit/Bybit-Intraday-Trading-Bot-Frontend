@@ -76,7 +76,7 @@ const backend = createServer(async (req, res) => {
     return json(res, 200, { equity: 1000, availableBalance: 1000 });
   }
 
-  if (method === "GET" && url.pathname === "/api/positions") {
+  if (method === "GET" && (url.pathname === "/api/positions" || url.pathname === "/api/bybit/positions")) {
     return json(res, 200, { positions: [] });
   }
 
@@ -84,8 +84,8 @@ const backend = createServer(async (req, res) => {
     return json(res, 200, { orders: [] });
   }
 
-  if (method === "GET" && url.pathname === "/api/market/klines") {
-    return json(res, 200, { candles: [] });
+  if (method === "GET" && (url.pathname === "/api/market/klines" || url.pathname === "/api/bybit/kline")) {
+    return json(res, 200, { candles: [], result: { list: [] } });
   }
 
   if (method === "GET" && url.pathname === "/api/logs") {
@@ -224,6 +224,7 @@ async function waitFor(url, timeoutMs = 30_000) {
 
 let frontend;
 let browser;
+let frontendLogs = "";
 try {
   backend.listen(backendPort, "127.0.0.1");
   await once(backend, "listening");
@@ -240,7 +241,6 @@ try {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let frontendLogs = "";
   frontend.stdout.on("data", (chunk) => { frontendLogs += chunk.toString(); });
   frontend.stderr.on("data", (chunk) => { frontendLogs += chunk.toString(); });
 
@@ -262,7 +262,7 @@ try {
     if (message.type() === "error") console.error(`browser console: ${message.text()}`);
   });
 
-  await page.goto(frontendBase, { waitUntil: "networkidle" });
+  await page.goto(frontendBase, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.locator("#root").waitFor({ state: "attached", timeout: 15_000 });
   const replayNav = page.locator("#desktop-sidebar #nav-item-historical-replay");
   await replayNav.waitFor({ state: "attached", timeout: 15_000 });
