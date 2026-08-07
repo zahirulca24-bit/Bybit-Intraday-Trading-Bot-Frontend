@@ -21,48 +21,24 @@ function numberValue(value: any, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function text(value: any, fallback = ""): string {
+  return value === null || value === undefined ? fallback : String(value);
+}
+
+function rows(value: any): AnyRecord[] {
+  return Array.isArray(value) ? value.filter((row) => row && typeof row === "object") : [];
+}
+
 function percentToRatio(value: any): number {
   return numberValue(value) / 100;
 }
 
-function stringValue(value: any, fallback = ""): string {
-  return value === null || value === undefined ? fallback : String(value);
-}
-
-function normalizeSignal(value: any): "Buy" | "Sell" | "WAIT" | "Blocked" | "Error" {
-  const text = stringValue(value, "WAIT").trim().toLowerCase();
-  if (text === "buy" || text === "long") return "Buy";
-  if (text === "sell" || text === "short") return "Sell";
-  if (text.includes("block")) return "Blocked";
-  if (text.includes("error") || text.includes("fail")) return "Error";
-  return "WAIT";
-}
-
-function executionReadiness(signal: string, row: AnyRecord): "EXECUTABLE" | "NOT_EXECUTABLE" | "BLOCKED" | "PENDING_RISK" | "ERROR" {
-  const supplied = stringValue(row?.executionReadiness).toUpperCase();
-  if (["EXECUTABLE", "NOT_EXECUTABLE", "BLOCKED", "PENDING_RISK", "ERROR"].includes(supplied)) {
-    return supplied as "EXECUTABLE" | "NOT_EXECUTABLE" | "BLOCKED" | "PENDING_RISK" | "ERROR";
-  }
-  if (signal === "Blocked") return "BLOCKED";
-  if (signal === "Error") return "ERROR";
-  if (signal === "Buy" || signal === "Sell") return "PENDING_RISK";
-  return "NOT_EXECUTABLE";
-}
-
-function costTier(value: any): "LOW" | "MEDIUM" | "HIGH" {
-  const text = stringValue(value, "blocked").toLowerCase();
-  if (["low", "normal"].includes(text)) return "LOW";
-  if (["medium", "reduced", "strong_only"].includes(text)) return "MEDIUM";
-  return "HIGH";
-}
-
 async function backendJson(path: string): Promise<any> {
   if (!ADMIN_TOKEN) {
-    const error = new Error("Vercel server is missing BACKEND_ADMIN_TOKEN.");
+    const error = new Error("Cloud Run frontend is missing BACKEND_ADMIN_TOKEN.");
     (error as any).status = 503;
     throw error;
   }
-
   const response = await fetch(`${BACKEND_URL}${path}`, {
     headers: {
       Accept: "application/json",
@@ -71,82 +47,122 @@ async function backendJson(path: string): Promise<any> {
     cache: "no-store",
     signal: AbortSignal.timeout(25_000),
   });
-  const text = await response.text();
-  let payload: any = {};
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = { error: text };
-    }
-  }
+  const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(
-      stringValue(payload?.error || payload?.reason || payload?.message, `Backend request failed (${response.status})`),
-    );
+    const error = new Error(text(body?.error || body?.reason || body?.message, `Backend request failed (${response.status})`));
     (error as any).status = response.status;
-    (error as any).payload = payload;
+    (error as any).payload = body;
     throw error;
   }
-  return payload;
+  return body;
 }
 
-function mapSignal(row: AnyRecord, entryTimeframe: string): AnyRecord {
-  const signal = normalizeSignal(row?.signal);
-  const router = row?.router || {};
-  const indicators = row?.indicators || {};
-  const engineStatus = row?.engineStatus || {};
-  const votes = Array.isArray(row?.engineVotes) ? row.engineVotes : [];
-  const readiness = executionReadiness(signal, row);
+function bySymbol(input: AnyRecord[]): Map<string, AnyRecord> {
+  return new Map(input.map((row) => [text(row?.symbol).toUpperCase(), row]));
+}
+
+function byCandidate(input: AnyRecord[]): Map<string, AnyRecord> {
+  return new Map(
+    input
+      .filter((row) => text(row?.candidateKey || row?.candidate_key))
+      .map((row) => [text(row?.candidateKey || row?.candidate_key), row]),
+  );
+}
+
+function currentCycle(snapshot: AnyRecord, field: string, expected: number): boolean {
+  return expected > 0 && numberValue(snapshot?.[field]) === expected;
+}
+
+function normalizedVotes(classification: AnyRecord): AnyRecord[] {
+  return rows(classification?.strategyVotes).map((vote, index) => ({
+    engineName: text(vote?.engine || vote?.engineName, `Strategy ${index + 1}`),
+    voteSignal: ["Buy", "Sell", "WAIT", "Blocked", "Error"].includes(text(vote?.signal)) ? text(vote?.signal) : "WAIT",
+    voteReason: text(vote?.reason, "No authoritative strategy reason supplied"),
+    voteStrengthPct: numberValue(vote?.strength ?? vote?.gradeScore),
+  }));
+}
+
+function mapAuthoritativeRow(
+  classification: AnyRecord,
+  market: AnyRecord,
+  five: AnyRecord | undefined,
+  risk: AnyRecord | undefined,
+  sizing: AnyRecord | undefined,
+  command: AnyRecord | undefined,
+): AnyRecord {
+  const fiveStatus = text(five?.status).toUpperCase();
+  const riskStatus = text(risk?.riskStatus).toUpperCase();
+  const sizingStatus = text(sizing?.positionSizingStatus || sizing?.status).toUpperCase();
+  const commandState = text(command?.state || command?.status).toUpperCase();
+
+  let signal: "Buy" | "Sell" | "WAIT" | "Blocked" | "Error" = "WAIT";
+  if (fiveStatus === "ERROR") signal = "Error";
+  else if (["SETUP_INVALIDATED", "BLOCKED_GRADE"].includes(fiveStatus) || riskStatus === "BLOCKED_RISK" || sizingStatus.includes("BLOCK")) signal = "Blocked";
+  else if (fiveStatus === "ENTRY_CONFIRMED") signal = text(five?.side) === "Sell" ? "Sell" : "Buy";
+
+  let executionReadiness: "EXECUTABLE" | "NOT_EXECUTABLE" | "BLOCKED" | "PENDING_RISK" | "ERROR" = "NOT_EXECUTABLE";
+  let readinessReason = text(five?.reason || classification?.reason, "Awaiting authoritative closed-candle confirmation");
+  if (signal === "Error") {
+    executionReadiness = "ERROR";
+  } else if (signal === "Blocked") {
+    executionReadiness = "BLOCKED";
+    readinessReason = text(risk?.riskDecision?.reason || sizing?.reason || five?.reason || classification?.reason, "Authoritative execution guard blocked this setup");
+  } else if (command && !["FAILED", "CLOSED"].includes(commandState)) {
+    executionReadiness = "EXECUTABLE";
+    readinessReason = `Durable execution command is ${commandState || "PUBLISHED"}`;
+  } else if (fiveStatus === "ENTRY_CONFIRMED") {
+    executionReadiness = "PENDING_RISK";
+    readinessReason = risk
+      ? text(risk?.riskDecision?.reason, "Authoritative risk evaluated; awaiting downstream execution approval")
+      : "Closed 5M entry confirmed; awaiting authoritative risk evaluation";
+  }
+
+  const indicators = classification?.indicators || five?.indicators || {};
+  const router = classification?.router || five?.router || {};
+  const backendTier = text(market?.costTier).toUpperCase();
+  const costTier: "LOW" | "MEDIUM" | "HIGH" = ["LOW", "MEDIUM", "HIGH"].includes(backendTier)
+    ? (backendTier as "LOW" | "MEDIUM" | "HIGH")
+    : "HIGH";
+  const signalCandleTime = numberValue(five?.entryFiveMinuteCandleTime || five?.observedFiveMinuteCandleTime || classification?.fifteenMinuteCandleTime, 0) || null;
 
   return {
-    symbol: stringValue(row?.symbol, "UNKNOWN"),
+    symbol: text(classification?.symbol, "UNKNOWN"),
     signal,
-    routerReason: stringValue(row?.reason || router?.reason, "No backend reason supplied"),
-    change24hPct: numberValue(row?.changePct),
-    turnoverUsdt: numberValue(row?.turnover24h),
-    spreadPct: percentToRatio(row?.spreadPct),
-    atr15m: numberValue(row?.atr15mPct),
-    volumeRatio: numberValue(row?.volumeRatio),
-    costTier: costTier(row?.costTier),
-    routerConfidencePct: numberValue(router?.confidence),
-    signalCandleTime: indicators?.signalCandleTime ?? null,
-    executionReadiness: readiness,
-    readinessReason: stringValue(
-      row?.readinessReason || row?.reason || router?.reason,
-      readiness === "PENDING_RISK"
-        ? "Signal is waiting for the canonical backend risk and execution gates."
-        : "No executable backend signal.",
-    ),
-    strategyVotes: votes.map((vote: AnyRecord, index: number) => ({
-      engineName: stringValue(vote?.engineName || vote?.engine || vote?.name, `Strategy ${index + 1}`),
-      voteSignal: normalizeSignal(vote?.signal || vote?.voteSignal),
-      voteReason: stringValue(vote?.reason || vote?.voteReason, "No backend reason supplied"),
-      voteStrengthPct: numberValue(vote?.strength || vote?.confidence || vote?.voteStrengthPct),
-    })),
+    routerReason: text(risk?.riskDecision?.reason || sizing?.reason || five?.reason || classification?.reason, "No authoritative reason supplied"),
+    change24hPct: 0,
+    turnoverUsdt: numberValue(market?.turnover24h),
+    spreadPct: percentToRatio(market?.spreadPct),
+    atr15m: 0,
+    volumeRatio: 0,
+    costTier,
+    routerConfidencePct: numberValue(five?.entryGradeScore || classification?.gradeScore || router?.confidence),
+    signalCandleTime,
+    executionReadiness,
+    readinessReason,
+    strategyVotes: normalizedVotes(classification),
     indicators: {
-      trend1h: stringValue(indicators?.trendDirection1H || indicators?.trend1h, "Unknown"),
+      trend1h: text(classification?.watchlistTrend || market?.oneHourTrend || market?.trend, "Unknown"),
       rsi15m: numberValue(indicators?.rsi15M || indicators?.rsi15m),
       rsi5m: numberValue(indicators?.rsi5M || indicators?.rsi5m),
       ema20_1h: numberValue(indicators?.ema20_1H || indicators?.ema20_1h),
       ema50_1h: numberValue(indicators?.ema50_1H || indicators?.ema50_1h),
-      entryTimeframe: `${stringValue(indicators?.entryInterval, entryTimeframe).replace(/m$/i, "")}m`,
-      closedSignalCandleTimestamp: indicators?.signalCandleTime ?? null,
+      entryTimeframe: "5m",
+      closedSignalCandleTimestamp: signalCandleTime,
     },
     pipelineStatuses: {
-      marketDataStatus: stringValue(engineStatus?.marketData, "unknown"),
-      indicatorStatus: stringValue(engineStatus?.indicator, "unknown"),
-      strategyStatus: stringValue(engineStatus?.strategy, "unknown"),
-      routerStatus: stringValue(engineStatus?.router, "unknown"),
-      riskStatus: stringValue(engineStatus?.risk, "unknown"),
-      tradeManagementStatus: stringValue(engineStatus?.tradeManagement, "unknown"),
-      journalStatus: stringValue(engineStatus?.journal, "unknown"),
+      marketDataStatus: "authoritative",
+      indicatorStatus: text(classification?.engineStatus?.indicator, "authoritative"),
+      strategyStatus: text(classification?.status, "unknown"),
+      routerStatus: text(classification?.engineStatus?.router, "unknown"),
+      riskStatus: riskStatus || (fiveStatus === "ENTRY_CONFIRMED" ? "PENDING_RISK" : "NOT_REACHED"),
+      tradeManagementStatus: commandState || "NOT_REACHED",
+      journalStatus: command ? "PENDING_EXECUTION_LEDGER" : "NOT_REACHED",
     },
   };
 }
 
 export default async function handler(req: RequestLike, res: ResponseLike): Promise<void> {
-  if (stringValue(req?.method, "GET").toUpperCase() !== "GET") {
+  if (text(req?.method, "GET").toUpperCase() !== "GET") {
     res.setHeader("Allow", "GET");
     sendJson(res, 405, { error: "Method not allowed" });
     return;
@@ -154,68 +170,114 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
 
   const started = Date.now();
   try {
-    const requestedMode = stringValue(req?.query?.mode, "balanced").toLowerCase();
-    const requestedInterval = stringValue(req?.query?.interval, "15").replace(/m$/i, "");
-    const raw = await backendJson(
-      `/api/bot/scanner?interval=${encodeURIComponent(requestedInterval)}&mode=${encodeURIComponent(requestedMode)}`,
-    );
+    // Single source of truth: the scanner UI reads the exact staged runtime
+    // snapshots that feed Risk -> Sizing -> PostgreSQL Outbox -> Node Execution.
+    // It deliberately does NOT call /api/bot/scanner or independently run evaluate_signal().
+    const status = await backendJson("/api/workers/status");
+    const runtime = status?.runtime || {};
 
-    const rows = Array.isArray(raw?.rows) ? raw.rows : [];
-    const universe = raw?.universe || {};
-    const metrics = universe?.metrics || {};
-    const scanMeta = raw?.scanMeta || {};
-    const policy = universe?.policy || raw?.policy || {};
-    const entryTimeframe = `${stringValue(raw?.interval, requestedInterval).replace(/m$/i, "")}m`;
-    const updatedAt = numberValue(universe?.updatedAt, 0);
-    const rejectedCount = numberValue(scanMeta?.rejected) + numberValue(metrics?.agreementRequiredExcluded);
+    const daily = runtime?.dailyUniverse || {};
+    const fourHour = runtime?.fourHourDirectionalPool || {};
+    const oneHour = runtime?.hourlyWatchlist || {};
+    const classification = runtime?.fifteenMinuteStrategyClassification || {};
+    const five = runtime?.fiveMinuteEntryConfirmation || {};
+    const risk = runtime?.authoritativeEntryRisk || {};
+    const sizing = runtime?.positionSizingMargin || {};
+    const outbox = runtime?.executionCommandOutbox?.snapshot || runtime?.executionCommandOutbox || {};
+
+    const classificationCandle = numberValue(classification?.fifteenMinuteCandleTime);
+    const fiveAligned = currentCycle(five, "setupFifteenMinuteCandleTime", classificationCandle);
+    const fiveCandle = fiveAligned ? numberValue(five?.fiveMinuteCandleTime) : 0;
+    const riskAligned = fiveCandle > 0 && currentCycle(risk, "fiveMinuteCandleTime", fiveCandle);
+
+    const marketMap = bySymbol(rows(oneHour?.rows));
+    const fiveMap = bySymbol(fiveAligned ? rows(five?.rows) : []);
+    const riskMap = byCandidate(riskAligned ? rows(risk?.rows) : []);
+    const sizingMap = byCandidate(riskAligned ? rows(sizing?.rows) : []);
+    const commandMap = byCandidate(rows(outbox?.rows || outbox?.commands));
+
+    const canonicalRows = rows(classification?.rows).map((row) => {
+      const symbol = text(row?.symbol).toUpperCase();
+      const fiveRow = fiveMap.get(symbol);
+      const candidateKey = text(fiveRow?.candidateKey);
+      return mapAuthoritativeRow(
+        row,
+        marketMap.get(symbol) || {},
+        fiveRow,
+        candidateKey ? riskMap.get(candidateKey) : undefined,
+        candidateKey ? sizingMap.get(candidateKey) : undefined,
+        candidateKey ? commandMap.get(candidateKey) : undefined,
+      );
+    });
+
+    const dailyRows = rows(daily?.rows);
+    const fourHourRows = rows(fourHour?.rows);
+    const oneHourRows = rows(oneHour?.rows);
+    const fiveRows = fiveAligned ? rows(five?.rows) : [];
+    const riskRows = riskAligned ? rows(risk?.rows) : [];
+    const blockedRisk = riskRows.filter((row) => text(row?.riskStatus).toUpperCase() === "BLOCKED_RISK").length;
+    const commandRows = rows(outbox?.rows || outbox?.commands);
+    const latestUpdated = Math.max(
+      numberValue(classification?.updatedAt),
+      fiveAligned ? numberValue(five?.updatedAt) : 0,
+      riskAligned ? numberValue(risk?.updatedAt) : 0,
+      numberValue(sizing?.updatedAt),
+      numberValue(outbox?.updatedAt),
+    );
 
     sendJson(res, 200, {
       summary: {
-        totalContracts: numberValue(metrics?.totalContracts, rows.length),
-        validUsdtContracts: numberValue(metrics?.validUsdt, rows.length),
-        spreadPassed: numberValue(metrics?.spreadPassed),
-        liquidityPassed: numberValue(metrics?.liquidityPassed),
-        enriched: numberValue(metrics?.enriched),
-        shortlisted: numberValue(metrics?.shortlisted, scanMeta?.shortlistSize || rows.length),
-        deepScanned: numberValue(metrics?.deepScan, scanMeta?.deepScanSize || rows.length),
-        completed: numberValue(scanMeta?.completed, rows.length),
-        rejected: rejectedCount,
-        timedOut: scanMeta?.timedOut ? 1 : 0,
+        totalContracts: numberValue(daily?.metrics?.eligibleInput, dailyRows.length),
+        validUsdtContracts: dailyRows.length,
+        spreadPassed: fourHourRows.length,
+        liquidityPassed: oneHourRows.length,
+        enriched: canonicalRows.length,
+        shortlisted: numberValue(classification?.metrics?.setupClassified),
+        deepScanned: fiveRows.length,
+        completed: riskRows.length,
+        rejected: blockedRisk,
+        timedOut: commandRows.length,
         scanDurationMs: Date.now() - started,
-        lastUpdated: updatedAt > 0
-          ? new Date(updatedAt < 10_000_000_000 ? updatedAt * 1000 : updatedAt).toISOString()
-          : "",
-        entryTimeframe,
-        routerMode: stringValue(raw?.mode, requestedMode),
-        universeLabel: stringValue(universe?.source, "Bybit Demo backend-selected universe"),
+        lastUpdated: latestUpdated > 0 ? new Date(latestUpdated * 1000).toISOString() : "",
+        entryTimeframe: "15m setup -> closed 5m confirmation",
+        routerMode: "authoritative",
+        universeLabel: "AUTHORITATIVE_EXECUTION_PIPELINE",
         bybitMode: "Bybit Demo API",
       },
       policy: {
-        shortlistSize: numberValue(policy?.shortlistSize, scanMeta?.shortlistSize),
-        deepScanSize: numberValue(policy?.deepScanSize, scanMeta?.deepScanSize),
-        normalSpreadThresholdPct: percentToRatio(policy?.normalSpreadPct),
-        reducedSizeSpreadThresholdPct: percentToRatio(policy?.reducedSpreadPct),
-        maxSpreadThresholdPct: percentToRatio(policy?.maxSpreadPct),
-        minTurnoverUsdt: numberValue(policy?.minimumTurnover),
-        minAtr15m: numberValue(policy?.minimumAtrPct),
-        maxAtr15m: numberValue(policy?.maximumAtrPct),
-        minVolumeRatio: numberValue(policy?.minimumVolumeRatio),
-        minGrossRR: numberValue(policy?.minimumGrossRr),
-        minNetRR: numberValue(policy?.minimumNetRr),
-        preferredNetRR: numberValue(policy?.preferredNetRr),
-        normalCostToRiskLimitPct: numberValue(policy?.normalCostRiskPct),
-        maxCostToRiskLimitPct: numberValue(policy?.maximumCostRiskPct),
-        refreshIntervalSec: numberValue(raw?.topGainerRefreshSeconds, policy?.refreshSeconds),
-        scanDeadlineMs: numberValue(scanMeta?.deadlineSeconds, policy?.deadlineSeconds) * 1000,
+        shortlistSize: oneHourRows.length,
+        deepScanSize: numberValue(classification?.metrics?.setupClassified),
+        normalSpreadThresholdPct: 0,
+        reducedSizeSpreadThresholdPct: 0,
+        maxSpreadThresholdPct: 0,
+        minTurnoverUsdt: 0,
+        minAtr15m: 0,
+        maxAtr15m: 0,
+        minVolumeRatio: 0,
+        minGrossRR: 0,
+        minNetRR: 0,
+        preferredNetRR: 0,
+        normalCostToRiskLimitPct: 0,
+        maxCostToRiskLimitPct: 0,
+        refreshIntervalSec: numberValue(runtime?.settings?.setupIntervalSeconds, 300),
+        scanDeadlineMs: 0,
       },
-      signals: rows.map((row: AnyRecord) => mapSignal(row, entryTimeframe)),
+      signals: canonicalRows,
+      canonical: {
+        source: "/api/workers/status",
+        classificationCandleTime: classificationCandle || null,
+        fiveMinuteCandleTime: fiveCandle || null,
+        fiveMinuteAligned: fiveAligned,
+        riskAligned,
+        executionPath: "Daily Top100 -> 4H Top50 -> 1H Top20 -> 15M -> 5M -> Risk -> Sizing -> PostgreSQL -> Node",
+      },
     });
   } catch (error: any) {
     const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
     sendJson(res, timeout ? 504 : numberValue(error?.status, 502), {
       error: timeout
-        ? "Google Cloud Run backend timed out. Retry after checking backend readiness."
-        : stringValue(error?.message, "Unable to load canonical scanner data"),
+        ? "Google Cloud Run backend timed out while loading authoritative execution snapshots."
+        : text(error?.message, "Unable to load authoritative scanner/execution truth"),
       upstream: error?.payload,
     });
   }
