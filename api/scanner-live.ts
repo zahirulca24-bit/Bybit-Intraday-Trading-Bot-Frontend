@@ -21,6 +21,12 @@ function numberValue(value: any, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function optionalNumber(value: any): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function text(value: any, fallback = ""): string {
   return value === null || value === undefined ? fallback : String(value);
 }
@@ -40,10 +46,7 @@ async function backendJson(path: string): Promise<any> {
     throw error;
   }
   const response = await fetch(`${BACKEND_URL}${path}`, {
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${ADMIN_TOKEN}`,
-    },
+    headers: { Accept: "application/json", Authorization: `Bearer ${ADMIN_TOKEN}` },
     cache: "no-store",
     signal: AbortSignal.timeout(25_000),
   });
@@ -62,11 +65,7 @@ function bySymbol(input: AnyRecord[]): Map<string, AnyRecord> {
 }
 
 function byCandidate(input: AnyRecord[]): Map<string, AnyRecord> {
-  return new Map(
-    input
-      .filter((row) => text(row?.candidateKey || row?.candidate_key))
-      .map((row) => [text(row?.candidateKey || row?.candidate_key), row]),
-  );
+  return new Map(input.filter((row) => text(row?.candidateKey || row?.candidate_key)).map((row) => [text(row?.candidateKey || row?.candidate_key), row]));
 }
 
 function currentCycle(snapshot: AnyRecord, field: string, expected: number): boolean {
@@ -82,14 +81,7 @@ function normalizedVotes(classification: AnyRecord): AnyRecord[] {
   }));
 }
 
-function mapAuthoritativeRow(
-  classification: AnyRecord,
-  market: AnyRecord,
-  five: AnyRecord | undefined,
-  risk: AnyRecord | undefined,
-  sizing: AnyRecord | undefined,
-  command: AnyRecord | undefined,
-): AnyRecord {
+function mapAuthoritativeRow(classification: AnyRecord, market: AnyRecord, five: AnyRecord | undefined, risk: AnyRecord | undefined, sizing: AnyRecord | undefined, command: AnyRecord | undefined): AnyRecord {
   const fiveStatus = text(five?.status).toUpperCase();
   const riskStatus = text(risk?.riskStatus).toUpperCase();
   const sizingStatus = text(sizing?.positionSizingStatus || sizing?.status).toUpperCase();
@@ -102,9 +94,8 @@ function mapAuthoritativeRow(
 
   let executionReadiness: "EXECUTABLE" | "NOT_EXECUTABLE" | "BLOCKED" | "PENDING_RISK" | "ERROR" = "NOT_EXECUTABLE";
   let readinessReason = text(five?.reason || classification?.reason, "Awaiting authoritative closed-candle confirmation");
-  if (signal === "Error") {
-    executionReadiness = "ERROR";
-  } else if (signal === "Blocked") {
+  if (signal === "Error") executionReadiness = "ERROR";
+  else if (signal === "Blocked") {
     executionReadiness = "BLOCKED";
     readinessReason = text(risk?.riskDecision?.reason || sizing?.reason || five?.reason || classification?.reason, "Authoritative execution guard blocked this setup");
   } else if (command && !["FAILED", "CLOSED"].includes(commandState)) {
@@ -112,17 +103,13 @@ function mapAuthoritativeRow(
     readinessReason = `Durable execution command is ${commandState || "PUBLISHED"}`;
   } else if (fiveStatus === "ENTRY_CONFIRMED") {
     executionReadiness = "PENDING_RISK";
-    readinessReason = risk
-      ? text(risk?.riskDecision?.reason, "Authoritative risk evaluated; awaiting downstream execution approval")
-      : "Closed 5M entry confirmed; awaiting authoritative risk evaluation";
+    readinessReason = risk ? text(risk?.riskDecision?.reason, "Authoritative risk evaluated; awaiting downstream execution approval") : "Closed 5M entry confirmed; awaiting authoritative risk evaluation";
   }
 
   const indicators = classification?.indicators || five?.indicators || {};
   const router = classification?.router || five?.router || {};
   const backendTier = text(market?.costTier).toUpperCase();
-  const costTier: "LOW" | "MEDIUM" | "HIGH" = ["LOW", "MEDIUM", "HIGH"].includes(backendTier)
-    ? (backendTier as "LOW" | "MEDIUM" | "HIGH")
-    : "HIGH";
+  const costTier: "LOW" | "MEDIUM" | "HIGH" = ["LOW", "MEDIUM", "HIGH"].includes(backendTier) ? backendTier as "LOW" | "MEDIUM" | "HIGH" : "HIGH";
   const signalCandleTime = numberValue(five?.entryFiveMinuteCandleTime || five?.observedFiveMinuteCandleTime || classification?.fifteenMinuteCandleTime, 0) || null;
 
   return {
@@ -132,8 +119,9 @@ function mapAuthoritativeRow(
     change24hPct: 0,
     turnoverUsdt: numberValue(market?.turnover24h),
     spreadPct: percentToRatio(market?.spreadPct),
-    atr15m: 0,
-    volumeRatio: 0,
+    atr15m: optionalNumber(classification?.atr15mPct),
+    volumeRatio: optionalNumber(classification?.volumeRatio),
+    marketMetricsCandleTime: optionalNumber(classification?.marketMetricsCandleTime),
     costTier,
     routerConfidencePct: numberValue(five?.entryGradeScore || classification?.gradeScore || router?.confidence),
     signalCandleTime,
@@ -150,7 +138,7 @@ function mapAuthoritativeRow(
       closedSignalCandleTimestamp: signalCandleTime,
     },
     pipelineStatuses: {
-      marketDataStatus: "authoritative",
+      marketDataStatus: classification?.atr15mPct != null && classification?.volumeRatio != null ? "authoritative" : "market_metrics_unavailable",
       indicatorStatus: text(classification?.engineStatus?.indicator, "authoritative"),
       strategyStatus: text(classification?.status, "unknown"),
       routerStatus: text(classification?.engineStatus?.router, "unknown"),
@@ -170,12 +158,8 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
 
   const started = Date.now();
   try {
-    // Single source of truth: the scanner UI reads the exact staged runtime
-    // snapshots that feed Risk -> Sizing -> PostgreSQL Outbox -> Node Execution.
-    // It deliberately does NOT call /api/bot/scanner or independently run evaluate_signal().
     const status = await backendJson("/api/workers/status");
     const runtime = status?.runtime || {};
-
     const daily = runtime?.dailyUniverse || {};
     const fourHour = runtime?.fourHourDirectionalPool || {};
     const oneHour = runtime?.hourlyWatchlist || {};
@@ -200,14 +184,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       const symbol = text(row?.symbol).toUpperCase();
       const fiveRow = fiveMap.get(symbol);
       const candidateKey = text(fiveRow?.candidateKey);
-      return mapAuthoritativeRow(
-        row,
-        marketMap.get(symbol) || {},
-        fiveRow,
-        candidateKey ? riskMap.get(candidateKey) : undefined,
-        candidateKey ? sizingMap.get(candidateKey) : undefined,
-        candidateKey ? commandMap.get(candidateKey) : undefined,
-      );
+      return mapAuthoritativeRow(row, marketMap.get(symbol) || {}, fiveRow, candidateKey ? riskMap.get(candidateKey) : undefined, candidateKey ? sizingMap.get(candidateKey) : undefined, candidateKey ? commandMap.get(candidateKey) : undefined);
     });
 
     const dailyRows = rows(daily?.rows);
@@ -217,13 +194,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const riskRows = riskAligned ? rows(risk?.rows) : [];
     const blockedRisk = riskRows.filter((row) => text(row?.riskStatus).toUpperCase() === "BLOCKED_RISK").length;
     const commandRows = rows(outbox?.rows || outbox?.commands);
-    const latestUpdated = Math.max(
-      numberValue(classification?.updatedAt),
-      fiveAligned ? numberValue(five?.updatedAt) : 0,
-      riskAligned ? numberValue(risk?.updatedAt) : 0,
-      numberValue(sizing?.updatedAt),
-      numberValue(outbox?.updatedAt),
-    );
+    const latestUpdated = Math.max(numberValue(classification?.updatedAt), fiveAligned ? numberValue(five?.updatedAt) : 0, riskAligned ? numberValue(risk?.updatedAt) : 0, numberValue(sizing?.updatedAt), numberValue(outbox?.updatedAt));
 
     sendJson(res, 200, {
       summary: {
@@ -266,6 +237,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       canonical: {
         source: "/api/workers/status",
         classificationCandleTime: classificationCandle || null,
+        marketMetricsPublished: numberValue(classification?.metrics?.marketMetricsPublished),
         fiveMinuteCandleTime: fiveCandle || null,
         fiveMinuteAligned: fiveAligned,
         riskAligned,
@@ -275,9 +247,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
   } catch (error: any) {
     const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
     sendJson(res, timeout ? 504 : numberValue(error?.status, 502), {
-      error: timeout
-        ? "Google Cloud Run backend timed out while loading authoritative execution snapshots."
-        : text(error?.message, "Unable to load authoritative scanner/execution truth"),
+      error: timeout ? "Google Cloud Run backend timed out while loading authoritative execution snapshots." : text(error?.message, "Unable to load authoritative scanner/execution truth"),
       upstream: error?.payload,
     });
   }
