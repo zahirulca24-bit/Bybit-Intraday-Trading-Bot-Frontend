@@ -33,6 +33,17 @@ function rowsFrom(...values: any[]): AnyRecord[] {
   return [];
 }
 
+function candidateKey(row: AnyRecord): string {
+  return text(row?.candidateKey || row?.candidate_key || row?.key, "");
+}
+
+function currentCycleRows(rows: AnyRecord[], upstreamRows: AnyRecord[]): AnyRecord[] {
+  const keys = new Set(upstreamRows.map(candidateKey).filter(Boolean));
+  if (!keys.size) return rows;
+  const filtered = rows.filter((row) => keys.has(candidateKey(row)));
+  return filtered.length ? filtered : rows;
+}
+
 async function backendJson(path: string): Promise<any> {
   if (!ADMIN_TOKEN) throw new Error("BACKEND_ADMIN_TOKEN is not configured");
   const response = await fetch(`${BACKEND_URL}${path}`, {
@@ -114,53 +125,65 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const confirmed = rowsFrom(runtime?.fiveMinuteEntryConfirmation?.rows, setups?.confirmed5m, setups?.confirmed, setups?.pendingHandoff, setups?.queue);
 
     const riskSnapshot = runtime?.authoritativeEntryRisk || execution?.risk || {};
-    const riskRows = rowsFrom(riskSnapshot?.rows, execution?.riskRows, execution?.risk?.rows, execution?.riskApproved);
-    const riskApproved = rowsFrom(riskSnapshot?.approvedRiskQueue, execution?.approvedRiskQueue, execution?.riskApprovedQueue);
+    const allRiskRows = rowsFrom(riskSnapshot?.rows, execution?.riskRows, execution?.risk?.rows, execution?.riskApproved);
+    const allRiskApproved = rowsFrom(riskSnapshot?.approvedRiskQueue, execution?.approvedRiskQueue, execution?.riskApprovedQueue);
+    const riskRows = currentCycleRows(allRiskRows, confirmed);
+    const riskApproved = currentCycleRows(allRiskApproved, confirmed);
 
     const sizingSnapshot = runtime?.positionSizingMargin || execution?.sizing || {};
-    const sizingRows = rowsFrom(sizingSnapshot?.rows, execution?.sizingRows, execution?.sizing?.rows);
-    const sizingApproved = rowsFrom(sizingSnapshot?.approvedSizingQueue, execution?.approvedSizingQueue);
+    const allSizingRows = rowsFrom(sizingSnapshot?.rows, execution?.sizingRows, execution?.sizing?.rows);
+    const allSizingApproved = rowsFrom(sizingSnapshot?.approvedSizingQueue, execution?.approvedSizingQueue);
+    const sizingRows = currentCycleRows(allSizingRows, riskApproved);
+    const sizingApproved = currentCycleRows(allSizingApproved, riskApproved);
     const sizingStatus = text(sizingSnapshot?.status, "").toLowerCase();
+    const sizingWaiting = sizingRows.filter((row) => text(row?.positionSizingStatus).toUpperCase() === "SIZING_WAIT");
 
     const outboxSnapshot = runtime?.executionCommandOutbox || execution?.outbox || {};
     const outboxRows = rowsFrom(outboxSnapshot?.rows, execution?.executionCommands, execution?.commands, execution?.outbox?.rows, execution?.rows);
-    const commands = outboxRows.map(normalizeCommand);
+    const nodeCommandRows = outboxRows.filter((row) => NODE_STATES.includes(text(row?.state || row?.status).toUpperCase()));
+    const supportWaitRows = outboxRows.filter((row) => text(row?.state || row?.status).toUpperCase() === "WAIT_RETRY");
+    const commands = nodeCommandRows.map(normalizeCommand);
     const activeCommands = commands.filter((row) => !["CLOSED", "FAILED"].includes(row.state));
     const durable = normalizeDurable(status, execution, durableStatus);
 
     const riskDetail = riskRows.length
-      ? `${riskRows.length} risk result(s); ${riskApproved.length} approved for sizing`
+      ? `${riskRows.length} current-cycle risk result(s); ${riskApproved.length} risk-approved trade(s)`
       : "Risk engine not reached";
 
     let sizingState = "NOT_REACHED";
-    let sizingDetail = "Sizing engine not reached";
+    let sizingDetail = "Sizing calculator not reached";
     if (sizingRows.length) {
       sizingState = sizingApproved.length ? "PASS" : "WAIT";
-      sizingDetail = `${sizingRows.length} sizing result(s); ${sizingApproved.length} approved for execution`;
+      sizingDetail = sizingApproved.length
+        ? `${sizingRows.length} calculation(s); ${sizingApproved.length} ready for execution`
+        : `${sizingRows.length} calculation(s); ${sizingWaiting.length || sizingRows.length} waiting for executable order values — no trade rejection`;
     } else if (riskRows.length && riskApproved.length === 0) {
       sizingState = "WAIT";
-      sizingDetail = "No risk-approved candidate; sizing correctly idle";
+      sizingDetail = "No Risk-approved trade; sizing correctly idle";
     } else if (riskApproved.length > 0 && ["error", "stale"].includes(sizingStatus)) {
-      sizingState = "BLOCKED";
-      sizingDetail = text(sizingSnapshot?.lastError, "Sizing snapshot is unavailable");
+      sizingState = "WAIT";
+      sizingDetail = `${text(sizingSnapshot?.lastError, "Sizing calculator temporarily unavailable")} — Risk eligibility unchanged`;
     } else if (riskApproved.length > 0) {
       sizingState = "RUNNING";
-      sizingDetail = `${riskApproved.length} risk-approved candidate(s) awaiting sizing`;
+      sizingDetail = `${riskApproved.length} Risk-approved trade(s) awaiting quantity calculation`;
     }
 
     let outboxState = "NOT_REACHED";
-    let outboxDetail = "No sizing-approved candidate for execution support";
+    let outboxDetail = "SQL/Outbox support not reached";
     if (commands.length) {
       outboxState = durable.verified ? "PASS" : "WAIT";
       outboxDetail = durable.verified
-        ? `${commands.length} durable execution command(s)`
-        : `${commands.length} command(s); persistence degraded/unverified — retry/reconciliation required, not a strategy/risk rejection`;
+        ? `${commands.length} execution command(s) persisted; SQL is support infrastructure only`
+        : `${commands.length} command(s); SQL degraded/unverified — support retry only, trade eligibility unchanged`;
+    } else if (supportWaitRows.length) {
+      outboxState = "WAIT";
+      outboxDetail = `${supportWaitRows.length} SQL support operation(s) waiting/retrying — not a trade rejection`;
     } else if (sizingApproved.length > 0) {
       outboxState = "RUNNING";
-      outboxDetail = `${sizingApproved.length} sizing-approved candidate(s) awaiting execution command handoff`;
+      outboxDetail = `${sizingApproved.length} execution-ready trade(s); SQL support handoff pending`;
     } else if (sizingRows.length) {
       outboxState = "WAIT";
-      outboxDetail = "Sizing completed with no approved execution candidate";
+      outboxDetail = "Sizing calculator is waiting; SQL/Outbox has no trade-rejection authority";
     }
 
     const stages = [
@@ -168,8 +191,8 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
       stage("15M Classification", classified.length ? "PASS" : oneHour.length ? "RUNNING" : "NOT_REACHED", classified.length || null, classified.length ? `${classified.length} classified setup(s)` : "Waiting for closed 15M classification"),
       stage("5M Confirmation", confirmed.length ? "PASS" : classified.length ? "WAIT" : "NOT_REACHED", confirmed.length || null, confirmed.length ? `${confirmed.length} confirmed candidate(s)` : "Waiting for closed 5M confirmation"),
       stage("Risk Verdict", riskRows.length ? "PASS" : confirmed.length ? "RUNNING" : "NOT_REACHED", riskRows.length || null, riskDetail),
-      stage("Sizing Verdict", sizingState, sizingRows.length || null, sizingDetail),
-      stage("PostgreSQL Outbox", outboxState, commands.length || null, outboxDetail),
+      stage("Sizing Calculator", sizingState, sizingRows.length || null, sizingDetail),
+      stage("PostgreSQL Support", outboxState, commands.length || supportWaitRows.length || null, outboxDetail),
       stage("Node Execution", commands.some((row) => ["ORDER_PENDING", "PARTIALLY_FILLED", "MANAGING", "CLOSING", "CLOSED"].includes(row.state)) ? "PASS" : activeCommands.length ? "RUNNING" : "NOT_REACHED", activeCommands.length || null, activeCommands.length ? `${activeCommands.length} active Node command(s)` : "No active Node command"),
       stage("Trade Management", commands.some((row) => ["MANAGING", "CLOSING", "CLOSED"].includes(row.state)) ? "PASS" : commands.some((row) => row.state === "PARTIALLY_FILLED") ? "RUNNING" : "NOT_REACHED", null, "Worker owns full trade lifecycle: entry → fill → protection → active management → close → reconciliation"),
     ];
@@ -196,7 +219,11 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
         perTradeMarginCapPct: null,
         combinedMarginCapPct: null,
         freeReservePct: null,
-        sizingMethod: "APPROVED_RISK_AND_STRUCTURAL_STOP_WITH_REAL_AVAILABLE_MARGIN",
+        riskOwnsTradeEligibility: true,
+        sizingIsTradeRejectionGate: false,
+        outboxIsTradeRejectionGate: false,
+        journalIsTradeRejectionGate: false,
+        sizingMethod: "CALCULATOR_ONLY_APPROVED_RISK_STRUCTURAL_STOP_REAL_AVAILABLE_MARGIN",
         outboxAndJournalAreSupportInfrastructure: true,
         tp1: { r: 1.5, closePct: 40, next: "BREAK_EVEN" },
         tp2: { r: 2, closePct: 30 },
