@@ -4,7 +4,7 @@ type AnyRecord = Record<string, any>;
 type RequestLike = any;
 type ResponseLike = any;
 
-const DEFAULT_BACKEND_URL = "https://bybit-intraday-trading-bot.onrender.com";
+const DEFAULT_BACKEND_URL = "https://bybit-intraday-backend-608992045433.asia-south1.run.app";
 const BACKEND_URL = (
   process.env.BACKEND_API_URL ||
   process.env.VITE_API_BASE_URL ||
@@ -87,8 +87,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const account: AnyRecord = walletRaw?.result?.list?.[0] || {};
     const daily: AnyRecord = bot?.dailyRisk || {};
     const lastExecution: AnyRecord = executionRaw?.lastResult || {};
-    const lastSizing: AnyRecord =
-      lastExecution?.positionSizing || bot?.positionSizing || {};
+    const lastSizing: AnyRecord = lastExecution?.positionSizing || bot?.positionSizing || {};
 
     const equity = numberValue(
       account?.totalEquity || account?.totalWalletBalance,
@@ -125,15 +124,20 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
         ),
       },
       qualitySizing: {
-        source: "BACKEND_QUALITY_SIZING_POLICY",
+        source: "LOCKED_2026_08_08_BACKEND_SIZING_POLICY",
         aPlusRiskPct: 1.0,
-        aRiskPct: 0.75,
+        aRiskPct: 1.0,
         bPlusAction: "REJECT",
         lowerGradeAction: "REJECT",
-        minimumExecutableRiskPct: 0.75,
+        minimumExecutableRiskPct: 1.0,
         maximumExecutableRiskPct: 1.0,
         fixedAllocationCapEnabled: false,
-        sizingMethod: "ACCOUNT_EQUITY_X_GRADE_RISK_DIVIDED_BY_TECHNICAL_STOP_DISTANCE",
+        fixedPerTradeMarginCapEnabled: false,
+        fixedCombinedMarginCapEnabled: false,
+        fixedFreeReserveEnabled: false,
+        marginMode: "ISOLATED",
+        maximumLeverage: 10,
+        sizingMethod: "APPROVED_RISK_AND_STRUCTURAL_STOP_WITH_REAL_AVAILABLE_MARGIN",
         quantityRounding: "BYBIT_QTY_STEP_ROUND_DOWN_AND_FINAL_RISK_RECHECK",
         maxOpenPositions: numberValue(bot?.maxOpenPositions, 3),
         lastEvidence: Object.keys(lastSizing).length ? lastSizing : null,
@@ -167,7 +171,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
     sendJson(res, timeout ? 504 : numberValue(error?.status, 502), {
       error: timeout
-        ? "Risk-policy backend timed out. Render may be waking up; retry shortly."
+        ? "Risk-policy backend timed out; retry shortly."
         : stringValue(error?.message, "Unable to load backend risk policy"),
       upstream: error?.payload,
     });

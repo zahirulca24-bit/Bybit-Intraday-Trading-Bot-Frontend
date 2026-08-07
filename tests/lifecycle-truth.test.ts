@@ -24,7 +24,8 @@ test("PASS requires complete exchange execution evidence", async () => {
   const source = await read("api/lifecycle-truth.ts");
   assert.ok(source.includes("function hasCompleteExecutionEvidence"));
   assert.ok(source.includes('return hasCompleteExecutionEvidence(entry) ? "PASS" : "WAIT"'));
-  assert.ok(source.includes("evidence.leverage === 5"));
+  assert.ok(source.includes("evidence.leverage > 0"));
+  assert.ok(source.includes("evidence.leverage <= 10"));
   assert.ok(source.includes("evidenceComplete"));
 });
 

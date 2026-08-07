@@ -30,13 +30,31 @@ test("execution pipeline distinguishes evaluated risk from approved sizing input
   assert.ok(endpoint.includes("Sizing completed with no approved execution candidate"));
 });
 
-test("locked policy remains visible and unchanged", () => {
-  for (const token of ["ISOLATED", "leverage: 5", '"A+": 1', '"A": 0.75', '"B+": "REJECT"', "maxOpenPositions: 3", "perTradeMarginCapPct: 25", "combinedMarginCapPct: 60", "freeReservePct: 40"]) {
+test("locked policy reflects 08 Aug 2026 plan", () => {
+  for (const token of [
+    "ISOLATED",
+    "maximumLeverage: 10",
+    '"A+": 1',
+    '"A": 1',
+    '"B+": "REJECT"',
+    "maxOpenPositions: 3",
+    "fixedPerTradeMarginCapEnabled: false",
+    "fixedCombinedMarginCapEnabled: false",
+    "fixedFreeReserveEnabled: false",
+  ]) {
     assert.ok(endpoint.includes(token), token);
   }
+  assert.match(component, /MAX \{maxLeverage\}x/);
+  assert.match(component, /Fixed margin caps/);
+  assert.match(component, /REMOVED/);
   assert.match(component, /TP1 40% at 1\.5R/);
   assert.match(component, /TP2 30% at 2R/);
   assert.match(component, /Runner trail: 0\.5R/);
+});
+
+test("outbox persistence degradation is not presented as strategy or risk rejection", () => {
+  assert.ok(endpoint.includes("retry/reconciliation required, not a strategy/risk rejection"));
+  assert.ok(endpoint.includes('outboxState = durable.verified ? "PASS" : "WAIT"'));
 });
 
 test("Cloud Run server routes the dedicated truth adapter before generic BFF", () => {
