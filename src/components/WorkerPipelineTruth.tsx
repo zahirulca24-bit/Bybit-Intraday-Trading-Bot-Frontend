@@ -106,7 +106,7 @@ export const WorkerPipelineTruth: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div>
             <h3 className="text-sm font-bold text-slate-100">Authoritative Backend Pipeline</h3>
-            <p className="text-xs text-slate-400">Daily Top100 → 4H Top50 → 1H Top20 → 15M → 5M → Risk → Sizing → PostgreSQL → Node</p>
+            <p className="text-xs text-slate-400">1H Top20 → 15M → 5M → Risk → Sizing → PostgreSQL → Node</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className={`px-2.5 py-1 rounded border text-xs font-bold ${connected ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-red-500/40 bg-red-500/10 text-red-300"}`}>
@@ -120,7 +120,7 @@ export const WorkerPipelineTruth: React.FC = () => {
         {error && <div className="mb-3 rounded border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">Latest refresh failed: {error}. Previous data is not treated as current.</div>}
         {loading && !truth && <div className="text-xs text-slate-400 mb-3">Loading canonical execution truth…</div>}
         <div className="overflow-x-auto pb-2">
-          <div className="flex min-w-[1320px] items-stretch gap-2">
+          <div className="flex min-w-[1060px] items-stretch gap-2">
             {(truth?.stages || []).map((stage, index, all) => (
               <React.Fragment key={stage.name}>
                 <div className={`w-[118px] shrink-0 rounded-lg border p-2 ${stale ? styleFor("ERROR") : styleFor(stage.state)}`} title={stage.detail}>

@@ -109,8 +109,6 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     ]);
 
     const runtime = status?.runtime || {};
-    const daily = rowsFrom(runtime?.dailyUniverse?.rows, symbols?.dailyTop100, symbols?.top100, symbols?.daily?.rows);
-    const fourHour = rowsFrom(runtime?.fourHourDirectionalPool?.rows, symbols?.fourHourTop50, symbols?.top50, symbols?.fourHour?.rows);
     const oneHour = rowsFrom(runtime?.hourlyWatchlist?.rows, symbols?.oneHourTop20, symbols?.top20, symbols?.activeSymbols, symbols?.rows);
     const classified = rowsFrom(runtime?.fifteenMinuteStrategyClassification?.rows, setups?.classified15m, setups?.classifications, setups?.rows);
     const confirmed = rowsFrom(runtime?.fiveMinuteEntryConfirmation?.rows, setups?.confirmed5m, setups?.confirmed, setups?.pendingHandoff, setups?.queue);
@@ -166,9 +164,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     }
 
     const stages = [
-      stage("Daily Top100", daily.length ? "PASS" : "WAIT", daily.length || null, daily.length ? `${daily.length} symbols selected` : "Waiting for daily universe snapshot"),
-      stage("4H Top50", fourHour.length ? "PASS" : daily.length ? "RUNNING" : "NOT_REACHED", fourHour.length || null, fourHour.length ? `${fourHour.length} directional symbols` : "Waiting for 4H directional filter"),
-      stage("1H Top20", oneHour.length ? "PASS" : fourHour.length ? "RUNNING" : "NOT_REACHED", oneHour.length || null, oneHour.length ? `${oneHour.length} watchlist symbols` : "Waiting for 1H watchlist"),
+      stage("1H Top20", oneHour.length ? "PASS" : "RUNNING", oneHour.length || null, oneHour.length ? `${oneHour.length} watchlist symbols` : "Waiting for closed 1H watchlist"),
       stage("15M Classification", classified.length ? "PASS" : oneHour.length ? "RUNNING" : "NOT_REACHED", classified.length || null, classified.length ? `${classified.length} classified setup(s)` : "Waiting for closed 15M classification"),
       stage("5M Confirmation", confirmed.length ? "PASS" : classified.length ? "WAIT" : "NOT_REACHED", confirmed.length || null, confirmed.length ? `${confirmed.length} confirmed candidate(s)` : "Waiting for closed 5M confirmation"),
       stage("Risk Verdict", riskRows.length ? "PASS" : confirmed.length ? "RUNNING" : "NOT_REACHED", riskRows.length || null, riskDetail),
