@@ -119,8 +119,10 @@ function mapAuthoritativeRow(
 
   const indicators = classification?.indicators || five?.indicators || {};
   const router = classification?.router || five?.router || {};
-  const spreadPct = numberValue(market?.spreadPct);
-  const costTier: "LOW" | "MEDIUM" | "HIGH" = spreadPct > 0.15 ? "HIGH" : spreadPct > 0.08 ? "MEDIUM" : "LOW";
+  const backendTier = text(market?.costTier).toUpperCase();
+  const costTier: "LOW" | "MEDIUM" | "HIGH" = ["LOW", "MEDIUM", "HIGH"].includes(backendTier)
+    ? (backendTier as "LOW" | "MEDIUM" | "HIGH")
+    : "HIGH";
   const signalCandleTime = numberValue(five?.entryFiveMinuteCandleTime || five?.observedFiveMinuteCandleTime || classification?.fifteenMinuteCandleTime, 0) || null;
 
   return {
@@ -129,7 +131,7 @@ function mapAuthoritativeRow(
     routerReason: text(risk?.riskDecision?.reason || sizing?.reason || five?.reason || classification?.reason, "No authoritative reason supplied"),
     change24hPct: 0,
     turnoverUsdt: numberValue(market?.turnover24h),
-    spreadPct: percentToRatio(spreadPct),
+    spreadPct: percentToRatio(market?.spreadPct),
     atr15m: 0,
     volumeRatio: 0,
     costTier,
