@@ -29,6 +29,14 @@ test("PASS requires complete exchange execution evidence", async () => {
   assert.ok(source.includes("evidenceComplete"));
 });
 
+test("incomplete success claims are filtered while real pending/error evidence remains visible", async () => {
+  const source = await read("api/lifecycle-truth.ts");
+  assert.ok(source.includes("function explicitLifecycleProblemOrWait"));
+  assert.ok(source.includes("function shouldExposeLifecycle"));
+  assert.ok(source.includes("return hasCompleteExecutionEvidence(entry) || explicitLifecycleProblemOrWait(entry)"));
+  assert.ok(source.includes(".filter(shouldExposeLifecycle)"));
+});
+
 test("frontend never supplies fake leverage, size, or successful outcome", async () => {
   const source = await read("src/components/OrderLifecycleSection.tsx");
   assert.ok(source.includes('textValue(item.order?.leverage, "x")'));
