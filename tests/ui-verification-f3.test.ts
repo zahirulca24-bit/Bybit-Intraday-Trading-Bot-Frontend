@@ -6,10 +6,12 @@ const endpoint = fs.readFileSync("api/execution-truth.ts", "utf8");
 const component = fs.readFileSync("src/components/WorkerPipelineTruth.tsx", "utf8");
 const server = fs.readFileSync("cloud-run-server.ts", "utf8");
 
-test("durable execution truth is verified only for healthy restart-safe PostgreSQL", () => {
+test("durable execution truth verifies PostgreSQL health without turning support persistence into a trade rejection", () => {
   assert.ok(endpoint.includes('backend === "POSTGRESQL" && restartSafe && !degraded'));
   assert.ok(endpoint.includes("verified,"));
-  assert.ok(endpoint.includes('commands.length && durable.verified ? "PASS"'));
+  assert.ok(endpoint.includes('outboxState = durable.verified ? "PASS" : "WAIT"'));
+  assert.ok(endpoint.includes("not a strategy/risk rejection"));
+  assert.ok(!endpoint.includes('outboxState = commands.length && durable.verified ? "PASS" : "BLOCKED"'));
 });
 
 test("canonical durable state is fetched server-side with the existing authenticated backend client", () => {
