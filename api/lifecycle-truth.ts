@@ -56,7 +56,7 @@ function executionEvidence(entry: AnyRecord): AnyRecord {
     orderId: text(order?.orderId || order?.orderLinkId || payload?.orderId || payload?.orderLinkId),
     symbol: text(payload?.symbol || payload?.requestedSymbol || order?.symbol),
     price: optionalNumber(payload?.price ?? payload?.entryPrice ?? order?.avgPrice),
-    sizeUsdt: optionalNumber(payload?.notionalUsdt ?? payload?.sizeUsdt ?? payload?.requiredInitialMarginUsdt),
+    sizeUsdt: optionalNumber(payload?.notionalUsdt ?? payload?.sizeUsdt ?? payload?.notional ?? payload?.requiredInitialMarginUsdt),
     leverage: optionalNumber(payload?.leverage ?? payload?.nodeExecutionRequirements?.leverage),
     stopLoss: optionalNumber(payload?.stopLoss ?? payload?.stopLossPrice ?? payload?.technicalStopLoss),
     takeProfit: optionalNumber(payload?.takeProfit ?? payload?.takeProfitPrice ?? payload?.takeProfitReference),
@@ -65,9 +65,10 @@ function executionEvidence(entry: AnyRecord): AnyRecord {
 
 function hasCompleteExecutionEvidence(entry: AnyRecord): boolean {
   const evidence = executionEvidence(entry);
+  const leverageValid = evidence.leverage !== undefined && evidence.leverage > 0 && evidence.leverage <= 10;
   return Boolean(
     evidence.orderId && evidence.symbol && evidence.price && evidence.price > 0 &&
-    evidence.sizeUsdt && evidence.sizeUsdt > 0 && evidence.leverage === 5 &&
+    evidence.sizeUsdt && evidence.sizeUsdt > 0 && leverageValid &&
     evidence.stopLoss && evidence.stopLoss > 0 && evidence.takeProfit && evidence.takeProfit > 0
   );
 }
