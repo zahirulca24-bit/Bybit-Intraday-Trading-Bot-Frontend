@@ -6,20 +6,24 @@ const endpoint = fs.readFileSync("api/execution-truth.ts", "utf8");
 const component = fs.readFileSync("src/components/WorkerPipelineTruth.tsx", "utf8");
 const server = fs.readFileSync("cloud-run-server.ts", "utf8");
 
-test("durable execution truth verifies PostgreSQL health without turning support persistence into a trade rejection", () => {
+test("durable execution truth reports PostgreSQL as support-only without turning it into a trade rejection", () => {
   assert.ok(endpoint.includes('backend === "POSTGRESQL" && restartSafe && !degraded'));
-  assert.ok(endpoint.includes("verified,"));
-  assert.ok(endpoint.includes('outboxState = durable.verified ? "PASS" : "WAIT"'));
-  assert.ok(endpoint.includes("support retry only, trade eligibility unchanged"));
+  assert.ok(endpoint.includes('postgresRole: "SUPPORT_RECONCILIATION_ONLY"'));
   assert.ok(endpoint.includes("outboxIsTradeRejectionGate: false"));
-  assert.ok(!endpoint.includes('outboxState = commands.length && durable.verified ? "PASS" : "BLOCKED"'));
+  assert.ok(endpoint.includes("PostgreSQL Support"));
+  assert.ok(endpoint.includes("Persistence unavailable or retrying; execution eligibility unchanged."));
+  assert.ok(endpoint.includes("tradeRejectionAuthority: false"));
+  assert.ok(!endpoint.includes('stage("PostgreSQL Support"'));
   assert.ok(!endpoint.includes('outboxState = "BLOCKED"'));
 });
 
-test("sizing is rendered as calculator-only and cannot become a BLOCKED trade gate", () => {
-  assert.ok(endpoint.includes("Sizing Calculator"));
+test("Python sizing audit is support-only and cannot become a BLOCKED canonical trade gate", () => {
+  assert.ok(endpoint.includes("Python Sizing Audit"));
   assert.ok(endpoint.includes("sizingIsTradeRejectionGate: false"));
-  assert.ok(endpoint.includes("no trade rejection"));
+  assert.ok(endpoint.includes('pythonSizingRole: "SUPPORT_DIAGNOSTIC_ONLY"'));
+  assert.ok(component.includes("Support / Diagnostics — non-blocking"));
+  assert.ok(component.includes("Current pipeline point is derived ONLY from canonical execution stages"));
+  assert.ok(!endpoint.includes('stage("Sizing Calculator"'));
   assert.ok(!endpoint.includes('sizingState = "BLOCKED"'));
 });
 
