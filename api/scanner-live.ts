@@ -116,7 +116,7 @@ function mapAuthoritativeRow(classification: AnyRecord, market: AnyRecord, five:
     symbol: text(classification?.symbol, "UNKNOWN"),
     signal,
     routerReason: text(risk?.riskDecision?.reason || sizing?.reason || five?.reason || classification?.reason, "No authoritative reason supplied"),
-    change24hPct: 0,
+    change24hPct: numberValue(market?.change24hPct),
     turnoverUsdt: numberValue(market?.turnover24h),
     spreadPct: percentToRatio(market?.spreadPct),
     atr15m: optionalNumber(classification?.atr15mPct),
