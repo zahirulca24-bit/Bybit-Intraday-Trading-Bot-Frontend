@@ -81,15 +81,22 @@ function normalizedVotes(classification: AnyRecord): AnyRecord[] {
   }));
 }
 
-function mapAuthoritativeRow(classification: AnyRecord, market: AnyRecord, five: AnyRecord | undefined, risk: AnyRecord | undefined, sizing: AnyRecord | undefined, command: AnyRecord | undefined): AnyRecord {
+function mapAuthoritativeRow(
+  classification: AnyRecord,
+  market: AnyRecord,
+  five: AnyRecord | undefined,
+  risk: AnyRecord | undefined,
+  sizing: AnyRecord | undefined,
+  handoff: AnyRecord | undefined,
+): AnyRecord {
   const fiveStatus = text(five?.status).toUpperCase();
   const riskStatus = text(risk?.riskStatus).toUpperCase();
   const sizingStatus = text(sizing?.positionSizingStatus || sizing?.status).toUpperCase();
-  const commandState = text(command?.state || command?.status).toUpperCase();
+  const handoffState = text(handoff?.state || handoff?.status).toUpperCase();
 
   let signal: "Buy" | "Sell" | "WAIT" | "Blocked" | "Error" = "WAIT";
   if (fiveStatus === "ERROR") signal = "Error";
-  else if (["SETUP_INVALIDATED", "BLOCKED_GRADE"].includes(fiveStatus) || riskStatus === "BLOCKED_RISK" || sizingStatus.includes("BLOCK")) signal = "Blocked";
+  else if (["SETUP_INVALIDATED", "BLOCKED_GRADE"].includes(fiveStatus) || riskStatus === "BLOCKED_RISK") signal = "Blocked";
   else if (fiveStatus === "ENTRY_CONFIRMED") signal = text(five?.side) === "Sell" ? "Sell" : "Buy";
 
   let executionReadiness: "EXECUTABLE" | "NOT_EXECUTABLE" | "BLOCKED" | "PENDING_RISK" | "ERROR" = "NOT_EXECUTABLE";
@@ -97,13 +104,18 @@ function mapAuthoritativeRow(classification: AnyRecord, market: AnyRecord, five:
   if (signal === "Error") executionReadiness = "ERROR";
   else if (signal === "Blocked") {
     executionReadiness = "BLOCKED";
-    readinessReason = text(risk?.riskDecision?.reason || sizing?.reason || five?.reason || classification?.reason, "Authoritative execution guard blocked this setup");
-  } else if (command && !["FAILED", "CLOSED"].includes(commandState)) {
+    readinessReason = text(risk?.riskDecision?.reason || five?.reason || classification?.reason, "Authoritative Entry Safety blocked this setup");
+  } else if (handoffState === "DELIVERED") {
     executionReadiness = "EXECUTABLE";
-    readinessReason = `Durable execution command is ${commandState || "PUBLISHED"}`;
+    readinessReason = "Entry Safety approved and candidate delivered directly to Node; Node live sizing/execution owns the next decision";
+  } else if (risk?.riskApproved === true && riskStatus === "APPROVED_RISK") {
+    executionReadiness = "PENDING_RISK";
+    readinessReason = handoffState === "NODE_HANDOFF_RETRY"
+      ? "Entry Safety approved; direct Node handoff is retrying without changing risk eligibility"
+      : "Entry Safety approved; awaiting direct Node handoff";
   } else if (fiveStatus === "ENTRY_CONFIRMED") {
     executionReadiness = "PENDING_RISK";
-    readinessReason = risk ? text(risk?.riskDecision?.reason, "Authoritative risk evaluated; awaiting downstream execution approval") : "Closed 5M entry confirmed; awaiting authoritative risk evaluation";
+    readinessReason = "Closed 5M entry confirmed; awaiting authoritative Entry Safety";
   }
 
   const indicators = classification?.indicators || five?.indicators || {};
@@ -115,7 +127,7 @@ function mapAuthoritativeRow(classification: AnyRecord, market: AnyRecord, five:
   return {
     symbol: text(classification?.symbol, "UNKNOWN"),
     signal,
-    routerReason: text(risk?.riskDecision?.reason || sizing?.reason || five?.reason || classification?.reason, "No authoritative reason supplied"),
+    routerReason: text(risk?.riskDecision?.reason || five?.reason || classification?.reason, "No authoritative reason supplied"),
     change24hPct: numberValue(market?.change24hPct),
     turnoverUsdt: numberValue(market?.turnover24h),
     spreadPct: percentToRatio(market?.spreadPct),
@@ -143,8 +155,10 @@ function mapAuthoritativeRow(classification: AnyRecord, market: AnyRecord, five:
       strategyStatus: text(classification?.status, "unknown"),
       routerStatus: text(classification?.engineStatus?.router, "unknown"),
       riskStatus: riskStatus || (fiveStatus === "ENTRY_CONFIRMED" ? "PENDING_RISK" : "NOT_REACHED"),
-      tradeManagementStatus: commandState || "NOT_REACHED",
-      journalStatus: command ? "PENDING_EXECUTION_LEDGER" : "NOT_REACHED",
+      nodeHandoffStatus: handoffState || "NOT_REACHED",
+      pythonSizingDiagnosticStatus: sizingStatus || "NOT_REACHED",
+      tradeManagementStatus: "NODE_OWNED",
+      journalStatus: "SUPPORT_ONLY",
     },
   };
 }
@@ -167,7 +181,9 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const five = runtime?.fiveMinuteEntryConfirmation || {};
     const risk = runtime?.authoritativeEntryRisk || {};
     const sizing = runtime?.positionSizingMargin || {};
-    const outbox = runtime?.executionCommandOutbox?.snapshot || runtime?.executionCommandOutbox || {};
+    const outboxRoot = runtime?.executionCommandOutbox || {};
+    const outbox = outboxRoot?.snapshot || outboxRoot;
+    const nodeHandoff = outbox?.nodeHandoff || outboxRoot?.nodeHandoff || {};
 
     const classificationCandle = numberValue(classification?.fifteenMinuteCandleTime);
     const fiveAligned = currentCycle(five, "setupFifteenMinuteCandleTime", classificationCandle);
@@ -178,13 +194,20 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const fiveMap = bySymbol(fiveAligned ? rows(five?.rows) : []);
     const riskMap = byCandidate(riskAligned ? rows(risk?.rows) : []);
     const sizingMap = byCandidate(riskAligned ? rows(sizing?.rows) : []);
-    const commandMap = byCandidate(rows(outbox?.rows || outbox?.commands));
+    const handoffMap = byCandidate(rows(nodeHandoff?.rows));
 
     const canonicalRows = rows(classification?.rows).map((row) => {
       const symbol = text(row?.symbol).toUpperCase();
       const fiveRow = fiveMap.get(symbol);
-      const candidateKey = text(fiveRow?.candidateKey);
-      return mapAuthoritativeRow(row, marketMap.get(symbol) || {}, fiveRow, candidateKey ? riskMap.get(candidateKey) : undefined, candidateKey ? sizingMap.get(candidateKey) : undefined, candidateKey ? commandMap.get(candidateKey) : undefined);
+      const key = text(fiveRow?.candidateKey);
+      return mapAuthoritativeRow(
+        row,
+        marketMap.get(symbol) || {},
+        fiveRow,
+        key ? riskMap.get(key) : undefined,
+        key ? sizingMap.get(key) : undefined,
+        key ? handoffMap.get(key) : undefined,
+      );
     });
 
     const dailyRows = rows(daily?.rows);
@@ -193,8 +216,14 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const fiveRows = fiveAligned ? rows(five?.rows) : [];
     const riskRows = riskAligned ? rows(risk?.rows) : [];
     const blockedRisk = riskRows.filter((row) => text(row?.riskStatus).toUpperCase() === "BLOCKED_RISK").length;
-    const commandRows = rows(outbox?.rows || outbox?.commands);
-    const latestUpdated = Math.max(numberValue(classification?.updatedAt), fiveAligned ? numberValue(five?.updatedAt) : 0, riskAligned ? numberValue(risk?.updatedAt) : 0, numberValue(sizing?.updatedAt), numberValue(outbox?.updatedAt));
+    const handoffRows = rows(nodeHandoff?.rows);
+    const latestUpdated = Math.max(
+      numberValue(classification?.updatedAt),
+      fiveAligned ? numberValue(five?.updatedAt) : 0,
+      riskAligned ? numberValue(risk?.updatedAt) : 0,
+      numberValue(sizing?.updatedAt),
+      numberValue(outbox?.updatedAt),
+    );
 
     sendJson(res, 200, {
       summary: {
@@ -207,16 +236,18 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
         deepScanned: fiveRows.length,
         completed: riskRows.length,
         rejected: blockedRisk,
-        timedOut: commandRows.length,
+        timedOut: numberValue(nodeHandoff?.retrying),
         scanDurationMs: Date.now() - started,
         lastUpdated: latestUpdated > 0 ? new Date(latestUpdated * 1000).toISOString() : "",
-        entryTimeframe: "15m setup -> closed 5m confirmation",
+        entryTimeframe: "15m setup -> later fully closed 5m confirmation",
         routerMode: "authoritative",
         universeLabel: "AUTHORITATIVE_EXECUTION_PIPELINE",
         bybitMode: "Bybit Demo API",
       },
       policy: {
         shortlistSize: oneHourRows.length,
+        watchlistLimit: 50,
+        strategyEngineCount: 6,
         deepScanSize: numberValue(classification?.metrics?.setupClassified),
         normalSpreadThresholdPct: 0,
         reducedSizeSpreadThresholdPct: 0,
@@ -225,13 +256,19 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
         minAtr15m: 0,
         maxAtr15m: 0,
         minVolumeRatio: 0,
-        minGrossRR: 0,
+        minGrossRR: 2,
         minNetRR: 0,
         preferredNetRR: 0,
         normalCostToRiskLimitPct: 0,
         maxCostToRiskLimitPct: 0,
         refreshIntervalSec: numberValue(runtime?.settings?.setupIntervalSeconds, 300),
         scanDeadlineMs: 0,
+        maximumRiskPerTradePct: 1,
+        maximumLeverage: 10,
+        maxActiveTrades: 3,
+        pythonSizingIsBlocking: false,
+        postgresIsBlocking: false,
+        nodeLiveSizingIsAuthoritative: true,
       },
       signals: canonicalRows,
       canonical: {
@@ -241,7 +278,17 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
         fiveMinuteCandleTime: fiveCandle || null,
         fiveMinuteAligned: fiveAligned,
         riskAligned,
-        executionPath: "Daily Top100 -> 4H Top50 -> 1H Top20 -> 15M -> 5M -> Risk -> Sizing -> PostgreSQL -> Node",
+        nodeHandoff: {
+          delivered: numberValue(nodeHandoff?.delivered),
+          retrying: numberValue(nodeHandoff?.retrying),
+          rejectedInvalid: numberValue(nodeHandoff?.rejectedInvalid),
+          rows: handoffRows,
+        },
+        support: {
+          pythonSizing: text(sizing?.status, "WAIT"),
+          postgres: text(outbox?.postgresSupport?.status || outboxRoot?.postgresSupport?.status, "WAIT_RETRY"),
+        },
+        executionPath: "Eligible USDT -> 1H Top50 -> 15M -> closed 5M -> Entry Safety -> Node Handoff -> Node Live Sizing -> Node Execution -> Trade Management",
       },
     });
   } catch (error: any) {
