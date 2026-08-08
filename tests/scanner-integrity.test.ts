@@ -12,16 +12,17 @@ test("scanner reads the authoritative worker runtime instead of the legacy scann
   assert.ok(source.includes("Authorization: `Bearer ${ADMIN_TOKEN}`"));
 });
 
-test("scanner consumes the same staged snapshots as execution truth", async () => {
+test("scanner consumes canonical and diagnostic snapshots without making support stages blocking", async () => {
   const source = await read("api/scanner-live.ts");
-  assert.ok(source.includes("runtime?.dailyUniverse"));
-  assert.ok(source.includes("runtime?.fourHourDirectionalPool"));
   assert.ok(source.includes("runtime?.hourlyWatchlist"));
   assert.ok(source.includes("runtime?.fifteenMinuteStrategyClassification"));
   assert.ok(source.includes("runtime?.fiveMinuteEntryConfirmation"));
   assert.ok(source.includes("runtime?.authoritativeEntryRisk"));
   assert.ok(source.includes("runtime?.positionSizingMargin"));
   assert.ok(source.includes("runtime?.executionCommandOutbox"));
+  assert.ok(source.includes("pythonSizingIsBlocking: false"));
+  assert.ok(source.includes("postgresIsBlocking: false"));
+  assert.ok(source.includes("nodeLiveSizingIsAuthoritative: true"));
 });
 
 test("scanner rejects cross-cycle 5m and risk snapshots", async () => {
@@ -38,11 +39,21 @@ test("scanner never promotes a 15m setup to Buy or Sell before closed 5m confirm
   assert.ok(source.includes('let signal: "Buy" | "Sell" | "WAIT" | "Blocked" | "Error" = "WAIT"'));
 });
 
-test("scanner only reports executable when a durable command exists", async () => {
+test("scanner only reports executable after direct Node delivery, not PostgreSQL AVAILABLE", async () => {
   const source = await read("api/scanner-live.ts");
-  assert.ok(source.includes('else if (command && !["FAILED", "CLOSED"].includes(commandState))'));
+  assert.ok(source.includes('else if (handoffState === "DELIVERED")'));
   assert.ok(source.includes('executionReadiness = "EXECUTABLE"'));
   assert.ok(source.includes('executionReadiness = "PENDING_RISK"'));
+  assert.ok(!source.includes('command && !["FAILED", "CLOSED"].includes(commandState)'));
+});
+
+test("scanner path is Top50 Entry Safety direct Node sizing and keeps six engines", async () => {
+  const source = await read("api/scanner-live.ts");
+  assert.ok(source.includes("1H Top50 -> 15M -> closed 5M -> Entry Safety -> Node Handoff -> Node Live Sizing -> Node Execution -> Trade Management"));
+  assert.ok(source.includes("watchlistLimit: 50"));
+  assert.ok(source.includes("strategyEngineCount: 6"));
+  assert.ok(!source.includes("1H Top20"));
+  assert.ok(!source.includes("Risk -> Sizing -> PostgreSQL -> Node"));
 });
 
 test("scanner normalizes backend percentage points to frontend ratios without a second threshold policy", async () => {
